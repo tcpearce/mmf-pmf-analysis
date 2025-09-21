@@ -184,6 +184,54 @@ The current focus is on completing the temporal alignment pipeline test to ensur
 
 **Impact**: Confirmed that temporal averaging provides substantial sensitivity improvements that properly propagate through the entire PMF source apportionment analysis pipeline, with implementation efficiency at 99.8-100.0% of theoretical maximum.
 
+## 2025-09-21 19:09 - ✅ COMPLETED: MMF9 30-minute Parquet Processing
+
+**Summary**: Successfully processed MMF9 (Galingale View) raw Excel data to generate 30-minute resampled parquet files with comprehensive metadata.
+
+**Command Used**:
+```bash
+python process_mmf_fixed.py \
+  --raw-excel "mmf_data_corrected/MMF9_Galingale_View/raw/61379dace1c94403959b18fbd97184b7_Silverdale Ambient Air Monitoring Data -MMF Galingale View - Mar 2021 to Jul 2025.xlsx" \
+  --station MMF9 \
+  --timebase 30min \
+  --aggregate mean \
+  --min-valid-subsamples 2 \
+  --include-voc \
+  --output-dir mmf_test_30min
+```
+
+**Processing Results**:
+- **Input Data**: 461,676 gas records (5-min) + 152,900 particle records (15-min)
+- **Output**: 77,255 combined records at 30-minute timebase
+- **Date Range**: March 5, 2021 12:30 to July 31, 2025 23:45
+- **Gas Species**: WD, WS, CH4, NOX, NO, NO2, SO2, H2S (with units: Degrees, m/s, mg/m³, μg/m³)
+- **Particle Species**: PM1, PM2.5, PM4, PM10, TSP FIDAS, TEMP, Pressure (with units: μg/m³, °C, hPa)
+- **Data Quality**: 75,869 gas data points, 75,313 particle data points
+- **File Size**: 6.5 MB parquet file with aggregation metadata
+
+**Files Generated**:
+- `mmf_test_30min/MMF9_combined_data.parquet` (6,515,744 bytes)
+- `mmf_test_30min/MMF9_metadata.txt` (1,351 bytes)
+- `mmf_test_30min/MMF9_summary.txt` (4,284 bytes)
+- `mmf_test_30min/MMF9_run.log` (3,669 bytes)
+
+**Technical Details**:
+- **Aggregation Method**: Mean values with minimum 2 valid subsamples per 30-min window
+- **Missing Data Handling**: Forward-fill for particle data (max 3 intervals)
+- **Count Tracking**: Sub-sample counts stored for uncertainty scaling (n_* columns)
+- **Availability Flags**: gas_data_available, particle_data_available for each record
+- **Units Preservation**: All original units maintained in metadata
+- **VOC Compatibility**: Flagged for downstream VOC integration
+
+**Data Quality Validation**:
+- ✅ 30-minute temporal spacing confirmed
+- ✅ 33 columns including concentrations, counts, and metadata
+- ✅ Proper datetime indexing from 2021-03-05 to 2025-07-31
+- ✅ Realistic concentration ranges preserved
+- ✅ Count columns properly populated for uncertainty scaling
+
+**Impact**: MMF9 data now ready for PMF source apportionment analysis with optimal temporal resolution and proper uncertainty propagation.
+
 ## 2024-12-20 16:45 - Commit 1: EPA S/N Weighting CLI Plumbing Added ✅
 
 **Summary**: Added comprehensive CLI argument framework for EPA-style uncertainty calculation and S/N-based feature categorization. All new flags default to legacy behavior (no-op) to ensure safe incremental implementation.
