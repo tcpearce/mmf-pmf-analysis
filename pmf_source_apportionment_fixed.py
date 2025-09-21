@@ -2647,6 +2647,10 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         wind_speed_patterns = ['wind_speed', 'wind_vel', 'ws', 'WindSpeed', 'WIND SPD']
         
         for col in self.df.columns:
+            # Skip count columns (prefixed with 'n_') - prefer actual data columns
+            if col.startswith('n_'):
+                continue
+                
             # Check for wind direction
             if any(pattern.lower() in col.lower() for pattern in wind_dir_patterns):
                 wind_dir_col = col
@@ -3105,12 +3109,13 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         temp_patterns = ['temp', 'temperature', 'ambient_temp', 'air_temp', 't_air', 'ta']
         
         for col in self.df.columns:
+            # Skip count and availability columns
+            if col.startswith('n_') or col.lower() in ['gas_data_available', 'particle_data_available', 'station_name']:
+                continue
             if any(pattern.lower() in col.lower() for pattern in temp_patterns):
                 # Only include numeric columns (float or int)
                 if pd.api.types.is_numeric_dtype(self.df[col]):
-                    # Skip columns that are boolean or have non-temperature meanings
-                    if col.lower() not in ['gas_data_available', 'particle_data_available', 'station_name']:
-                        temp_columns.append(col)
+                    temp_columns.append(col)
         
         if not temp_columns:
             print("   ⚠️ No temperature data found in dataset - skipping temperature analysis")
@@ -3531,12 +3536,13 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         pressure_patterns = ['press', 'pressure', 'barometric', 'atm_press', 'bp', 'pa', 'hpa', 'mbar']
         
         for col in self.df.columns:
+            # Skip count and availability columns
+            if col.startswith('n_') or col.lower() in ['gas_data_available', 'particle_data_available', 'station_name']:
+                continue
             if any(pattern.lower() in col.lower() for pattern in pressure_patterns):
                 # Only include numeric columns (float or int)
                 if pd.api.types.is_numeric_dtype(self.df[col]):
-                    # Skip columns that are boolean or have non-pressure meanings
-                    if col.lower() not in ['gas_data_available', 'particle_data_available', 'station_name']:
-                        pressure_columns.append(col)
+                    pressure_columns.append(col)
         
         if not pressure_columns:
             print("   ⚠️ No pressure data found in dataset - skipping pressure analysis")
