@@ -219,3 +219,58 @@ The current focus is on completing the temporal alignment pipeline test to ensur
 **Git Commit**: [6795018](https://github.com/user/repo/commit/6795018)
 
 **Next Steps**: Implement EPA uncertainty engine behind `--uncertainty-mode=epa` flag in Commit 2.
+
+## 2024-12-20 17:30 - Commit 2: EPA Uncertainty Engine Implementation ✅
+
+**Summary**: Implemented comprehensive EPA PMF 5.0 uncertainty calculation engine as alternative to legacy fixed-table approach. EPA mode provides concentration-dependent uncertainties with proper aggregation scaling.
+
+**Files Created**:
+- `epa_uncertainty.py` - Complete EPA uncertainty calculation module with built-in EF/MDL data
+
+**Files Modified**:
+- `pmf_source_apportionment_fixed.py` - Added EPA vs legacy uncertainty modes, updated aggregation logic
+
+**EPA Uncertainty Features**:
+- **EPA Formulas**: `sqrt((EF × conc)² + (0.5 × MDL)²)` for conc > MDL
+- **BDL Handling**: Configurable `5/6 × MDL` or `0.5 × MDL` for conc ≤ MDL
+- **Aggregation Scaling**: `1/√n` applied after EPA formulas (not double-applied)
+- **Built-in Data**: Comprehensive EF/MDL for gas, VOC, and PM species
+- **CSV Override**: External EF/MDL tables supported via `--uncertainty-ef-mdl`
+- **Numerical Stability**: Configurable epsilon floor (default: 1e-12)
+
+**Integration Changes**:
+- **Mode Selection**: `--uncertainty-mode=legacy` (default) or `epa`
+- **Legacy Preservation**: Original uncertainty calculation with min_u clamping intact
+- **Smart Scaling**: Aggregation scaling skipped for EPA mode (already included)
+- **Diagnostics**: EPA uncertainties saved when `--write-diagnostics=true`
+- **Fallback Safety**: EPA mode falls back to legacy if module unavailable
+
+**Built-in EF/MDL Database**:
+```
+Gas Species:     EF=10-20%,  MDL=2-50 μg/m³
+VOC Species:     EF=20-25%,  MDL=1-2 μg/m³  
+PM Species:      EF=15-20%,  MDL=2-10 μg/m³
+```
+
+**Validation Results**:
+- EPA uncertainty module loads successfully
+- Policy summary confirms correct formulas and defaults
+- Aggregation scaling properly integrated (no double-scaling)
+- Legacy mode unaffected (backward compatibility maintained)
+- Help system updated with all EPA parameters
+
+**CLI Parameters**:
+- `--uncertainty-ef-mdl`: Path to CSV with custom EF/MDL data
+- `--uncertainty-epsilon`: Numerical floor (default: 1e-12)
+- `--uncertainty-bdl-policy`: BDL formula choice (five-sixth-mdl/half-mdl)
+- `--legacy-min-u`: Min uncertainty for legacy mode (default: 0.1)
+
+**Technical Implementation**:
+- **Modular Design**: EPA calculator as separate class with factory function
+- **Error Handling**: Graceful fallback to legacy mode if EPA module missing
+- **Memory Efficient**: Process species individually with vectorized NumPy operations
+- **Concentration Adjustments**: EPA BDL/missing replacement rules applied consistently
+
+**Git Commit**: [30c6f2f](https://github.com/user/repo/commit/30c6f2f)
+
+**Next Steps**: Implement ESAT S/N computation and categorization behind `--snr-enable` flag in Commit 3.

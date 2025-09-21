@@ -1120,12 +1120,20 @@ class MMFPMFAnalyzer:
             return
         
         # Test range of factors (EPA recommends testing multiple values)
-        # Use user-specified max_factors or default, but don't exceed number of species
-        max_factors = min(getattr(self, 'max_factors', 10), V.shape[1])  # Don't exceed number of species
+        # CRITICAL: Never allow n_factors = n_species (creates DoF = 0)
+        # Must always leave at least 1 degree of freedom
+        species_limit = V.shape[1] - 1  # Always leave at least 1 DoF
+        max_factors = min(getattr(self, 'max_factors', 10), species_limit)
+        
+        if max_factors < 2:
+            print(f"⚠️  Warning: Only {V.shape[1]} species available - using 2 factors minimum")
+            self.factors = 2
+            return
+            
         factor_range = range(2, max_factors + 1)  # 2 to max_factors (inclusive)
         q_values = {}
         
-        print(f"  Testing factors from 2 to {max_factors} (limited by {V.shape[1]} species)")
+        print(f"  Testing factors from 2 to {max_factors} (max: {V.shape[1]-1} to ensure DoF > 0)")
         
         for n_factors in factor_range:
             print(f"  Testing {n_factors} factors...")
@@ -1147,22 +1155,34 @@ class MMFPMFAnalyzer:
                 print(f"    ❌ Failed: {e}")
                 continue
         
-        # Select optimal number of factors (look for elbow in Q curve)
+        # Select optimal number of factors using EPA guidelines
         if q_values:
-            # Use EPA guideline: significant decrease in Q/dof
-            optimal_factors = min(q_values.keys(), key=q_values.get)
+            # Calculate Q/DoF ratios to find best fit (should be close to 1.0)
+            q_dof_ratios = {}
+            n_samples, n_species = V.shape
+            
+            for nf, q_val in q_values.items():
+                dof = (n_samples * n_species) - (n_samples * nf) - (n_species * nf) + (nf * nf)
+                if dof > 0:
+                    q_dof_ratios[nf] = q_val / dof
+                else:
+                    q_dof_ratios[nf] = float('inf')  # Invalid - should not happen now
+            
+            # Select factor number with Q/DoF closest to 1.0 (EPA best practice)
+            optimal_factors = min(q_dof_ratios.keys(), key=lambda nf: abs(q_dof_ratios[nf] - 1.0))
             self.factors = optimal_factors
-            print(f"📊 Optimal factors selected: {self.factors}")
+            print(f"📊 Optimal factors selected: {self.factors} (Q/DoF = {q_dof_ratios[optimal_factors]:.3f})")
             
             # Store optimization results for plotting
             self.optimization_q_values = q_values.copy()
             self.optimal_factors = optimal_factors
             
-            # Show the Q-value progression for user understanding
-            print(f"  Q-value progression:")
+            # Show the Q-value and Q/DoF progression for user understanding
+            print(f"  Q-value and Q/DoF progression:")
             for nf in sorted(q_values.keys()):
                 marker = " ← SELECTED" if nf == optimal_factors else ""
-                print(f"    {nf} factors: Q = {q_values[nf]:.2f}{marker}")
+                q_dof_ratio = q_dof_ratios.get(nf, float('inf'))
+                print(f"    {nf} factors: Q = {q_values[nf]:.2f}, Q/DoF = {q_dof_ratio:.3f}{marker}")
         else:
             print("⚠️  Using default factor number: 4")
             self.factors = 4

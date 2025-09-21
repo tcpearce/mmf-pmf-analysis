@@ -1,0 +1,81 @@
+None Wind-Factor Analysis Summary
+==================================================
+
+Total matched data points: 93
+Wind direction range: 47.2° - 316.5°
+Most frequent wind direction: 310.2°
+Wind speed range: 0.1 - 1.8
+Mean wind speed: 0.7
+
+Factor Statistics:
+--------------------
+Factor 1:
+  Mean contribution: 5.276
+  Std deviation: 11.600
+  Max contribution: 58.110
+  Correlation with wind direction: 0.172
+  Correlation with wind speed: -0.221
+
+Factor 2:
+  Mean contribution: 2.220
+  Std deviation: 3.701
+  Max contribution: 14.111
+  Correlation with wind direction: 0.186
+  Correlation with wind speed: -0.043
+
+Factor 3:
+  Mean contribution: 2.893
+  Std deviation: 4.962
+  Max contribution: 22.477
+  Correlation with wind direction: 0.253
+  Correlation with wind speed: -0.285
+
+Factor 4:
+  Mean contribution: 4.606
+  Std deviation: 4.653
+  Max contribution: 24.192
+  Correlation with wind direction: 0.406
+  Correlation with wind speed: -0.316
+
+Factor 5:
+  Mean contribution: 4.865
+  Std deviation: 5.485
+  Max contribution: 23.509
+  Correlation with wind direction: 0.309
+  Correlation with wind speed: -0.276
+
+Factor 6:
+  Mean contribution: 1.575
+  Std deviation: 2.535
+  Max contribution: 8.558
+  Correlation with wind direction: -0.308
+  Correlation with wind speed: 0.352
+
+Factor 7:
+  Mean contribution: 7.290
+  Std deviation: 10.360
+  Max contribution: 51.652
+  Correlation with wind direction: 0.302
+  Correlation with wind speed: -0.276
+
+Factor 8:
+  Mean contribution: 2.896
+  Std deviation: 2.777
+  Max contribution: 13.324
+  Correlation with wind direction: 0.279
+  Correlation with wind speed: -0.217
+
+Factor 9:
+  Mean contribution: 4.084
+  Std deviation: 3.330
+  Max contribution: 13.241
+  Correlation with wind direction: 0.164
+  Correlation with wind speed: -0.119
+
+Factor 10:
+  Mean contribution: 2.160
+  Std deviation: 3.595
+  Max contribution: 13.031
+  Correlation with wind direction: 0.310
+  Correlation with wind speed: -0.348
+

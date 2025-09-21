@@ -1,0 +1,68 @@
+None Pressure-Factor Analysis Summary
+==================================================
+
+Total matched data points: 93
+Pressure columns analyzed: Pressure
+
+Pressure Statistics:
+  Range: 992.0 - 1014.5 hPa
+  Mean: 1003.8 hPa
+  Median: 1005.0 hPa
+  Std deviation: 6.4 hPa
+
+Factor-Pressure Correlations:
+------------------------------
+Factor 1:
+  Mean contribution: 5.199
+  Std deviation: 10.165
+  Correlation with pressure: 0.125
+  P-value: 2.337e-01
+  Interpretation: very weak positive correlation, not significant (ns)
+
+Factor 2:
+  Mean contribution: 0.312
+  Std deviation: 0.309
+  Correlation with pressure: 0.161
+  P-value: 1.232e-01
+  Interpretation: very weak positive correlation, not significant (ns)
+
+Factor 3:
+  Mean contribution: 8.572
+  Std deviation: 17.606
+  Correlation with pressure: 0.074
+  P-value: 4.812e-01
+  Interpretation: very weak positive correlation, not significant (ns)
+
+Factor 4:
+  Mean contribution: 23.303
+  Std deviation: 30.726
+  Correlation with pressure: 0.166
+  P-value: 1.118e-01
+  Interpretation: very weak positive correlation, not significant (ns)
+
+Factor 5:
+  Mean contribution: 0.000
+  Std deviation: 0.000
+  Correlation with pressure: -0.140
+  P-value: 1.794e-01
+  Interpretation: very weak negative correlation, not significant (ns)
+
+Environmental Interpretation Notes:
+-----------------------------------
+• Strong positive pressure correlation may indicate:
+  - High pressure system influences (stable conditions)
+  - Reduced atmospheric mixing
+  - Accumulation of local emissions
+  - Anticyclonic weather patterns
+
+• Strong negative pressure correlation may indicate:
+  - Low pressure system influences (unstable conditions)
+  - Enhanced atmospheric mixing and ventilation
+  - Storm/precipitation scavenging effects
+  - Cyclonic weather patterns with dilution
+
+• Factors with weak pressure correlation may indicate:
+  - Sources independent of meteorological conditions
+  - Industrial sources with constant emissions
+  - Indoor/sheltered emission sources
+  - Regional background contributions
