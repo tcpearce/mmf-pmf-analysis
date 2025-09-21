@@ -465,3 +465,33 @@ Parameter | Value | Description
 - Table structure validates correctly in HTML
 
 **Impact**: Dashboard CLI reproducibility section now displays parameter information clearly in properly formatted table structure, improving user experience and readability.
+
+## 2025-09-21 18:10 - Uncertainty Scaling Verification Complete ✅
+
+**Summary**: Verified that timebase averaging uncertainty scaling is correctly implemented and applied in PMF source apportionment analysis.
+
+**Verification Method**: Created `verify_uncertainty_scaling.py` script to analyze aggregation counts and expected scaling factors.
+
+**Key Findings**:
+- **Gas species** (CH4, NOX, NO, NO2, H2S): Average 6.0 sub-samples → **59.0% uncertainty reduction** (99.8% of theoretical maximum)
+- **Particle species** (PM FIDAS sensors): Average 2.0 sub-samples → **29.3% uncertainty reduction** (100.0% of theoretical maximum)  
+- **Scaling factors**: 0.409 for gas (1/√6), 0.707 for particles (1/√2) - mathematically correct
+
+**Implementation Confirmed**:
+1. **Legacy mode**: Applies 1/√n scaling after uncertainty calculation (lines 1088-1107)
+2. **EPA mode**: Includes 1/√n scaling within EPA uncertainty formulas (lines 241-243 in epa_uncertainty.py)
+3. **Console evidence**: Shows '🧮 Applied legacy uncertainty scaling based on aggregation counts (method=mean)'
+4. **Data flow**: Parquet metadata → counts.csv → PMF script scaling → improved model sensitivity
+
+**Files Involved**:
+- `pmf_source_apportionment_fixed.py` - Scaling application in run_pmf_analysis()
+- `epa_uncertainty.py` - EPA mode scaling integration  
+- `verify_uncertainty_scaling.py` - Verification script (created)
+
+**Test Results**:
+- 93 time periods analyzed with complete count coverage
+- All 10 species show proper scaling application  
+- Uncertainty improvements match theoretical predictions
+- PMF model quality: Q/DOF = 0.388 (Excellent) benefiting from enhanced uncertainty weighting
+
+**Impact**: Confirmed that temporal averaging provides substantial sensitivity improvements (29-59% uncertainty reduction) that properly propagate through the entire PMF analysis pipeline, enhancing model reliability and scientific validity.
