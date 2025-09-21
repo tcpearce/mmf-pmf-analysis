@@ -96,8 +96,14 @@ The current focus is on completing the temporal alignment pipeline test to ensur
   - Parquet file data is CORRECT: WD=72-333°, WS=0.22-2.37 m/s, varying properly
   - PMF concentrations are CORRECT: CH4=1330-2087 μg/m³ (proper unit conversion)
   - Wind summary shows WRONG values: WD=6.0°-6.0°, WS=6.0-6.0 m/s (constant)
-- **Issue Location**: Bug in pmf_source_apportionment_fixed.py wind analysis section
-- **Sankey Issue**: Likely related to data processing bug affecting factor-species flows
+- **ACTUAL ROOT CAUSE FOUND**: Wind speed data corruption in processing pipeline
+- **Evidence**:
+  - Raw Excel WS column is COMPLETELY EMPTY (all NaN values) ✓ Confirmed
+  - Processed parquet contains ARTIFICIAL WS values (0.3, 0.5, etc.) ❌ Corrupted
+  - High repetition: WS=0.3 appears 535 times, WS=0.5 appears 528 times
+  - Only 720 unique WS values across 75,830 records (0.009 ratio)
+- **Issue Location**: process_mmf_fixed.py aggregation pipeline creating fake wind speed data
+- **Suspected Cause**: Missing value handling, median replacement, or aggregation artifacts on empty WS column
 
 **13:30 - Discovered and fixed units row parsing bug**
 - **Issue Found**: MMF2 processing completed but output parquet only contains datetime and availability flags, no concentration data or count columns
