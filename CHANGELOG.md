@@ -46,3 +46,11 @@ The current focus is on completing the temporal alignment pipeline test to ensur
 2. 30min timebase aggregation works properly
 3. Metadata is propagated to PMF analysis
 4. Uncertainty scaling is applied based on aggregation counts
+
+**13:30 - Discovered and fixed units row parsing bug**
+- **Issue Found**: MMF2 processing completed but output parquet only contains datetime and availability flags, no concentration data or count columns
+- **Root Cause**: Excel files have units in row immediately after headers (row 1), causing all columns to be treated as strings instead of numeric
+- **Fixed**: Updated read_sheet_data to skip units row (header_row + 1) during data reading while preserving units extraction
+- **Fixed**: Updated availability flag logic to handle column names with suffixes (e.g., 'PM2.5 FIDAS')
+- **Result**: MMF2 processing now successful with 31 columns (concentrations + counts + metadata), 75,830 records at 30min timebase
+- **Verification**: Gas data points: 70,869, Particle data points: 70,473

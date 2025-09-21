@@ -162,9 +162,9 @@ class MMFProcessor:
             # Extract units from the row following headers
             units_dict = self.extract_units_from_excel(filepath, sheet_name, header_row)
             
-            # Read with identified header
+            # Read with identified header, skipping the units row that follows the header
             logging.info(f"Reading sheet {sheet_name} with header at row {header_row}")
-            df = pd.read_excel(filepath, sheet_name=sheet_name, header=header_row)
+            df = pd.read_excel(filepath, sheet_name=sheet_name, header=header_row, skiprows=lambda x: x == header_row + 1)
             
             # Clean column names
             df.columns = df.columns.astype(str).str.strip()
@@ -267,9 +267,9 @@ class MMFProcessor:
             # Sort and reindex
             combined = combined.sort_values('datetime').reset_index(drop=True)
 
-            # Add availability flags
-            h2s_col = 'H2S' if 'H2S' in combined.columns else None
-            pm25_col = 'PM2.5' if 'PM2.5' in combined.columns else None
+            # Add availability flags (handle column names with suffixes)
+            h2s_col = next((c for c in combined.columns if 'H2S' in c), None)
+            pm25_col = next((c for c in combined.columns if 'PM2.5' in c), None)
             combined['gas_data_available'] = combined[h2s_col].notna() if h2s_col else False
             combined['particle_data_available'] = combined[pm25_col].notna() if pm25_col else False
 
