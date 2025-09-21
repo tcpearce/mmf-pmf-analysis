@@ -52,6 +52,14 @@ from scipy.stats import pearsonr
 from analyze_parquet_data import ParquetAnalyzer
 from mmf_config import get_mmf_parquet_file, get_corrected_mmf_files, get_station_mapping
 
+# Import EPA uncertainty calculation module
+try:
+    from epa_uncertainty import create_epa_uncertainty_calculator
+    HAS_EPA_UNCERTAINTY = True
+except ImportError:
+    HAS_EPA_UNCERTAINTY = False
+    print("[WARNING] EPA uncertainty module not found. Only legacy uncertainty mode available.")
+
 # Import ESAT modules
 try:
     import esat
@@ -591,12 +599,116 @@ class MMFPMFAnalyzer:
 
     def _generate_uncertainty_matrix(self, pollutant_columns):
         """
-        Generate uncertainty matrix following EPA PMF 5.0 guidelines.
+        Generate uncertainty matrix using EPA or legacy mode based on configuration.
+        
+        EPA Mode: Uses EPA formulas with optional aggregation scaling
+        Legacy Mode: Original implementation with fixed MDL/EF table
+        """
+        print(f"🔬 Generating uncertainty matrix (mode: {self.uncertainty_mode})...")
+        
+        if self.uncertainty_mode == 'epa' and HAS_EPA_UNCERTAINTY:
+            return self._generate_epa_uncertainty_matrix(pollutant_columns)
+        else:
+            if self.uncertainty_mode == 'epa' and not HAS_EPA_UNCERTAINTY:
+                print("[WARNING] EPA mode requested but epa_uncertainty module not available. Using legacy mode.")
+            return self._generate_legacy_uncertainty_matrix(pollutant_columns)
+    
+    def _generate_epa_uncertainty_matrix(self, pollutant_columns):
+        """
+        Generate uncertainty matrix using EPA formulas and aggregation scaling.
+        """
+        print("📐 Using EPA uncertainty formulas...")
+        
+        # Create EPA uncertainty calculator
+        calculator = create_epa_uncertainty_calculator(
+            epsilon=self.uncertainty_epsilon,
+            bdl_policy=self.uncertainty_bdl_policy,
+            ef_mdl_csv=self.uncertainty_ef_mdl
+        )
+        
+        # Display policy summary
+        policy = calculator.get_policy_summary()
+        print(f"   BDL policy: {policy['bdl_formula']}")
+        print(f"   Above MDL: {policy['above_mdl_formula']}")
+        print(f"   EF/MDL source: {policy['ef_mdl_source']}")
+        
+        # Calculate EPA uncertainties for pollutant columns only
+        conc_for_uncertainty = self.concentration_data[pollutant_columns]
+        
+        # Load aggregation counts for scaling if available
+        counts_df = None
+        try:
+            counts_file = self.output_dir / f"{self.filename_prefix}_counts.csv"
+            if counts_file.exists():
+                counts_df = pd.read_csv(counts_file, index_col=0)
+                print(f"   📊 Loaded aggregation counts for scaling")
+            else:
+                print(f"   ℹ️ No aggregation counts available - EPA formulas only")
+        except Exception as e:
+            print(f"   ⚠️ Could not load aggregation counts: {e}")
+        
+        # Calculate EPA uncertainties with aggregation scaling
+        epa_uncertainties = calculator.calculate_species_uncertainties(
+            conc_for_uncertainty, counts_df
+        )
+        
+        # Initialize full uncertainty matrix and handle concentration adjustments
+        self.uncertainty_data = pd.DataFrame(
+            index=self.concentration_data.index,
+            columns=self.concentration_data.columns,
+            dtype=float
+        )
+        
+        # Copy EPA uncertainties for pollutant columns
+        for species in pollutant_columns:
+            if species in epa_uncertainties.columns:
+                self.uncertainty_data[species] = epa_uncertainties[species]
+                
+                # Apply EPA concentration adjustments for BDL and missing values
+                EF, MDL, unit = calculator.get_ef_mdl(species)
+                
+                conc_col = self.concentration_data[species].copy()
+                missing_mask = conc_col.isna()
+                zero_mask = (~missing_mask) & (conc_col == 0)
+                bdl_mask = (~missing_mask) & (conc_col <= MDL)
+                
+                # Handle zero-as-bdl policy
+                if hasattr(self, 'zero_as_bdl') and not self.zero_as_bdl:
+                    bdl_mask = bdl_mask & (~zero_mask)
+                    missing_mask = missing_mask | zero_mask
+                
+                # Apply EPA concentration replacements
+                if bdl_mask.any():
+                    self.concentration_data.loc[bdl_mask, species] = MDL * 0.5
+                if missing_mask.any():
+                    self.concentration_data.loc[missing_mask, species] = MDL
+                
+                # Summary statistics
+                total = len(conc_col)
+                n_meas = int((~missing_mask & ~bdl_mask).sum())
+                n_bdl = int(bdl_mask.sum())
+                n_missing = int(missing_mask.sum())
+                print(f"   ✅ {species}: EF={EF:.3f}, MDL={MDL:.1f} | measured={n_meas} ({n_meas/total*100:.1f}%), "
+                      f"BDL={n_bdl} ({n_bdl/total*100:.1f}%), missing={n_missing} ({n_missing/total*100:.1f}%)")
+            else:
+                # Fallback for species not handled by EPA calculator
+                print(f"   ⚠️ {species}: No EPA data, using default uncertainty")
+                self.uncertainty_data[species] = 1.0
+        
+        # Handle non-pollutant columns (if any)
+        for col in self.concentration_data.columns:
+            if col not in pollutant_columns:
+                self.uncertainty_data[col] = 1.0  # Default uncertainty
+        
+        print(f"🔬 EPA uncertainty matrix completed for {len(pollutant_columns)} species")
+        
+    def _generate_legacy_uncertainty_matrix(self, pollutant_columns):
+        """
+        Generate uncertainty matrix using original implementation.
         All MDL values below are specified in μg/m³ to match standardized V.
         
         EPA Formula: σ = sqrt((error_fraction * concentration)² + (MDL)²)
         """
-        print("🔬 Generating uncertainty matrix...")
         
         # EPA-recommended MDL values and error fractions by pollutant type (all in μg/m³)
         # Based on typical instrument specifications and EPA guidance
@@ -704,6 +816,9 @@ class MMFPMFAnalyzer:
                 v_new.loc[missing_mask] = mdl
                 u_col[missing_mask] = mdl * 4.0
 
+            # Apply legacy minimum uncertainty clamping
+            u_col = np.maximum(u_col, self.legacy_min_u)
+
             # Save back
             self.concentration_data[species] = v_new
             self.uncertainty_data[species] = u_col
@@ -717,7 +832,7 @@ class MMFPMFAnalyzer:
             n_meas = int(measured_mask.sum())
             n_bdl = int(bdl_mask.sum())
             n_missing = int(missing_mask.sum())
-            print(f"  {species}: MDL={mdl}, Err={err_frac*100:.1f}% | measured={n_meas} ({n_meas/total*100:.1f}%), "
+            print(f"  {species}: MDL={mdl}, Err={err_frac*100:.1f}%, min_u={self.legacy_min_u} | measured={n_meas} ({n_meas/total*100:.1f}%), "
                   f"BDL={n_bdl} ({n_bdl/total*100:.1f}%), missing={n_missing} ({n_missing/total*100:.1f}%) | Units={self.units.get(species, 'unknown')}")
     
     def _handle_missing_values(self):
@@ -823,6 +938,15 @@ class MMFPMFAnalyzer:
         
         print(f"💾 Saved concentration data: {conc_file}")
         print(f"💾 Saved uncertainty data: {unc_file}")
+        
+        # Save EPA-specific diagnostic files if requested
+        if getattr(self, 'write_diagnostics', True) and self.uncertainty_mode == 'epa':
+            try:
+                epa_unc_file = self.output_dir / f"{self.filename_prefix}_uncertainties_epa.csv"
+                unc_data.to_csv(epa_unc_file)
+                print(f"💾 Saved EPA uncertainties: {epa_unc_file}")
+            except Exception as e:
+                print(f"⚠️ Could not save EPA uncertainties: {e}")
     
     def run_pmf_analysis(self):
         """
@@ -845,26 +969,30 @@ class MMFPMFAnalyzer:
         U = unc_df.values   # Uncertainty matrix
         species_names = conc_df.columns.tolist()
 
-        # Apply uncertainty scaling for aggregated windows if counts and metadata available
-        try:
-            counts_file = self.output_dir / f"{self.filename_prefix}_counts.csv"
-            if counts_file.exists() and (self.aggregation_method in ("mean", "median")):
-                counts_df = pd.read_csv(counts_file, index_col=0)
-                # Build scaling factors per species
-                for j, sp in enumerate(species_names):
-                    n_col = f"n_{sp}"
-                    if n_col in counts_df.columns:
-                        n = counts_df[n_col].values.astype(float)
-                        n = np.where(np.isfinite(n) & (n > 0), n, 1.0)
-                        if self.aggregation_method == 'mean':
-                            scale = 1.0 / np.sqrt(n)
-                        else:
-                            # Median approx: 1.253/sqrt(n)
-                            scale = 1.253 / np.sqrt(n)
-                        U[:, j] = U[:, j] * scale
-                print(f"🧮 Applied uncertainty scaling based on aggregation counts (method={self.aggregation_method})")
-        except Exception as e:
-            print(f"⚠️ Could not apply aggregation-based uncertainty scaling: {e}")
+        # Apply uncertainty scaling for aggregated windows if using legacy mode
+        # (EPA mode already includes 1/sqrt(n) scaling in uncertainty calculation)
+        if self.uncertainty_mode == 'legacy':
+            try:
+                counts_file = self.output_dir / f"{self.filename_prefix}_counts.csv"
+                if counts_file.exists() and (self.aggregation_method in ("mean", "median")):
+                    counts_df = pd.read_csv(counts_file, index_col=0)
+                    # Build scaling factors per species
+                    for j, sp in enumerate(species_names):
+                        n_col = f"n_{sp}"
+                        if n_col in counts_df.columns:
+                            n = counts_df[n_col].values.astype(float)
+                            n = np.where(np.isfinite(n) & (n > 0), n, 1.0)
+                            if self.aggregation_method == 'mean':
+                                scale = 1.0 / np.sqrt(n)
+                            else:
+                                # Median approx: 1.253/sqrt(n)
+                                scale = 1.253 / np.sqrt(n)
+                            U[:, j] = U[:, j] * scale
+                    print(f"🧮 Applied legacy uncertainty scaling based on aggregation counts (method={self.aggregation_method})")
+            except Exception as e:
+                print(f"⚠️ Could not apply aggregation-based uncertainty scaling: {e}")
+        else:
+            print(f"ℹ️ EPA mode: aggregation scaling already included in uncertainty calculation")
         
         print(f"📊 Data matrices: V={V.shape}, U={U.shape}")
         print(f"📋 Species: {', '.join(species_names)}")

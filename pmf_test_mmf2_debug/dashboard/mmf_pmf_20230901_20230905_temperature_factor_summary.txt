@@ -1,0 +1,95 @@
+None Temperature-Factor Analysis Summary
+==================================================
+
+Total matched data points: 187
+Temperature columns analyzed: TEMP
+
+TEMP Statistics:
+  Range: 12.8 - 29.8 oC
+  Mean: 19.4 oC
+  Median: 18.7 oC
+  Std deviation: 4.5 oC
+
+Factor-Temperature Correlations:
+------------------------------
+Factor 1:
+  Mean contribution: 2.097
+  Std deviation: 2.433
+  Correlation with temperature: -0.065
+  P-value: 3.752e-01
+  Interpretation: very weak negative correlation, not significant (ns)
+
+Factor 2:
+  Mean contribution: 4.720
+  Std deviation: 5.628
+  Correlation with temperature: 0.117
+  P-value: 1.115e-01
+  Interpretation: very weak positive correlation, not significant (ns)
+
+Factor 3:
+  Mean contribution: 2.430
+  Std deviation: 3.966
+  Correlation with temperature: -0.330
+  P-value: 3.887e-06
+  Interpretation: weak negative correlation, highly significant (***)
+
+Factor 4:
+  Mean contribution: 7.852
+  Std deviation: 14.883
+  Correlation with temperature: -0.378
+  P-value: 9.835e-08
+  Interpretation: weak negative correlation, highly significant (***)
+
+Factor 5:
+  Mean contribution: 8.260
+  Std deviation: 9.095
+  Correlation with temperature: -0.266
+  P-value: 2.375e-04
+  Interpretation: very weak negative correlation, highly significant (***)
+
+Factor 6:
+  Mean contribution: 2.681
+  Std deviation: 2.459
+  Correlation with temperature: -0.169
+  P-value: 2.040e-02
+  Interpretation: very weak negative correlation, significant (*)
+
+Factor 7:
+  Mean contribution: 5.615
+  Std deviation: 5.265
+  Correlation with temperature: -0.296
+  P-value: 4.004e-05
+  Interpretation: very weak negative correlation, highly significant (***)
+
+Factor 8:
+  Mean contribution: 2.374
+  Std deviation: 2.986
+  Correlation with temperature: 0.421
+  P-value: 2.035e-09
+  Interpretation: weak positive correlation, highly significant (***)
+
+Factor 9:
+  Mean contribution: 3.157
+  Std deviation: 4.201
+  Correlation with temperature: -0.412
+  P-value: 4.538e-09
+  Interpretation: weak negative correlation, highly significant (***)
+
+Environmental Interpretation Notes:
+-----------------------------------
+• Strong positive temperature correlation may indicate:
+  - Biogenic emissions (vegetation)
+  - Photochemical secondary formation
+  - Evaporation of volatile compounds
+  - Increased mixing height effects
+
+• Strong negative temperature correlation may indicate:
+  - Residential heating sources
+  - Incomplete combustion in cold conditions
+  - Reduced atmospheric mixing
+  - Seasonal industrial patterns
+
+• Factors with weak temperature correlation may indicate:
+  - Industrial sources with constant emissions
+  - Traffic-related sources (less temperature dependent)
+  - Regional background contributions
