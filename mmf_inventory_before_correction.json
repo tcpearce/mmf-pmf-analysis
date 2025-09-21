@@ -1,0 +1,53 @@
+{
+  "timestamp": "2025-09-14T17:47:19.994719",
+  "current_structure": {
+    "MMF1": {
+      "actual_station": "Silverdale Pumping Station",
+      "expected_station": "Cemetery Road",
+      "raw_files": [
+        "mmf_data\\MMF1\\raw\\c39163361bc4854cac6f969b148b4c64_Silverdale Ambient Air Monitoring Data - MMF Silverdale Pumping Station - Mar 2021 to July 2025.xlsx"
+      ],
+      "processed_files": [
+        "mmf_data\\MMF1\\processed\\Silverdale Ambient Air Monitoring Data - MMF1 - Mar 21 to Aug 23.xlsx"
+      ]
+    },
+    "MMF2": {
+      "actual_station": "Cemetery Road",
+      "expected_station": "Silverdale Pumping Station",
+      "raw_files": [
+        "mmf_data\\MMF2\\raw\\7969ed6f77e41d4fd840a70cd840d42f_Silverdale_Ambient_Air_Monitoring_Data_-_Cemetery_Road_-_Mar_2021_-_Aug_2024.xlsx"
+      ],
+      "processed_files": [
+        "mmf_data\\MMF2\\processed\\Silverdale Ambient Air Monitoring Data - MMF2 - Mar 21 to Aug 23.xlsx"
+      ]
+    },
+    "MMF6": {
+      "actual_station": "Galingale View",
+      "expected_station": "Fire Station",
+      "raw_files": [
+        "mmf_data\\MMF6\\raw\\61379dace1c94403959b18fbd97184b7_Silverdale Ambient Air Monitoring Data -MMF Galingale View - Mar 2021 to Jul 2025.xlsx"
+      ],
+      "processed_files": [
+        "mmf_data\\MMF6\\processed\\Silverdale Ambient Air Monitoring Data - MMF6 - Mar 21 to June 23.xlsx"
+      ]
+    },
+    "MMF9": {
+      "actual_station": "Maries Way",
+      "expected_station": "Galingale View",
+      "raw_files": [
+        "mmf_data\\MMF9\\raw\\990db34b09e3de9643eb085dc78ce32d_Silverdale Ambient Air Monitoring Data - MMF Maries Way - Sep 2024 to July 2025.xlsx"
+      ],
+      "processed_files": [
+        "mmf_data\\MMF9\\processed\\Silverdale Ambient Air Monitoring Data - MMF9 - Mar 21 to Aug 23.xlsx"
+      ]
+    }
+  },
+  "raw_files": [],
+  "parquet_files": [
+    "mmf_parquet\\MMF1_combined_data.parquet",
+    "mmf_parquet\\MMF2_combined_data.parquet",
+    "mmf_parquet\\MMF6_combined_data.parquet",
+    "mmf_parquet\\MMF9_combined_data.parquet"
+  ],
+  "corrections_needed": {}
+}

@@ -1,0 +1,18 @@
+{
+  "timestamp": "2025-09-14T17:53:11.512137",
+  "results": [
+    {
+      "station_name": "Fire Station",
+      "mmf_id": "6",
+      "output_file": "mmf_parquet_corrected\\MMF6_Fire_Station_combined_data.parquet",
+      "record_count": 0,
+      "status": "empty_placeholder"
+    }
+  ],
+  "summary": {
+    "total_files_created": 1,
+    "stations_processed": [
+      "Fire Station"
+    ]
+  }
+}
