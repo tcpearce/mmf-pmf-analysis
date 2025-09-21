@@ -274,3 +274,159 @@ PM Species:      EF=15-20%,  MDL=2-10 μg/m³
 **Git Commit**: [30c6f2f](https://github.com/user/repo/commit/30c6f2f)
 
 **Next Steps**: Implement ESAT S/N computation and categorization behind `--snr-enable` flag in Commit 3.
+
+## 2025-09-21 18:30 - Commit 3: S/N Categorization Integration Complete ✅
+
+**Summary**: Successfully integrated EPA S/N-based feature categorization into PMF pipeline with automatic weak/bad species handling.
+
+### Added
+- **S/N Categorization Pipeline Integration**: Complete implementation of EPA S/N-based feature categorization
+  - Integration of `snr_categorization.py` module with PMF data preparation pipeline
+  - S/N computation using concentration and uncertainty DataFrames
+  - EPA categorization thresholds: strong (≥2.0), weak (0.2-2.0), bad (<0.2)
+  - Data quality assessment: BDL fraction, missing fraction, variance checks
+  - Weak species: uncertainty tripled (EPA PMF 5.0 recommendation)
+  - Bad species: completely removed from analysis matrices
+
+### Fixed
+- **Bad Species Exclusion**: Improved implementation to properly filter bad species
+  - **Previous**: Set concentration to zero (caused ESAT convergence issues)
+  - **Current**: Remove columns from concentration/uncertainty matrices
+  - **Result**: Clean data matrices without problematic species
+
+### S/N Categorization Results
+#### Legacy Mode (test_snr):
+- **H2S categorized as "weak"** (S/N = 1.192 < 2.0, 45.2% BDL)
+- **Action**: Uncertainty tripled for H2S
+- **PMF Results**: 4 factors, Q/DoF = 0.426 (Excellent), all 10 species retained
+
+#### EPA Mode (test_snr_epa_fixed):
+- **H2S categorized as "bad"** (S/N = 1.042, 96.8% BDL > 80% threshold)
+- **Action**: H2S completely removed from analysis
+- **PMF Results**: 3 factors, Q/DoF = 0.838 (Excellent), 9 species retained
+- **Impact**: Clean convergence without problematic species
+
+### Technical Implementation
+- `_apply_snr_categorization()` method added to PMF pipeline
+- Conditional execution based on `--snr-enable` flag
+- Integration with EPA calculator for MDL lookups when available
+- Diagnostic CSV outputs: `*_snr_metrics.csv`, `*_species_categories.csv`
+- Summary reporting with categorization statistics
+- Clean removal of bad species including corresponding count columns
+
+### CLI Parameters Tested
+- `--snr-enable` (default: false)
+- `--snr-weak-threshold` (default: 2.0)
+- `--snr-bad-threshold` (default: 0.2)
+- `--snr-bdl-weak-frac` (default: 0.6)
+- `--snr-bdl-bad-frac` (default: 0.8)
+- `--exclude-bad` (default: true)
+- `--write-diagnostics` (default: true)
+
+### Files Modified
+- `pmf_source_apportionment_fixed.py` - Added `_apply_snr_categorization()` method and integration logic
+- `snr_categorization.py` - SNR categorizer module (already existed from Commit 1)
+
+### Test Commands Used
+```bash
+# Legacy mode with S/N categorization
+python pmf_source_apportionment_fixed.py --data-dir mmf_test_30min --patterns "*mmf2*.parquet" --start-date 2023-09-01 --end-date 2023-09-03 --output-dir test_snr --uncertainty-mode legacy --snr-enable --write-diagnostics
+
+# EPA mode with S/N categorization
+python pmf_source_apportionment_fixed.py --data-dir mmf_test_30min --patterns "*mmf2*.parquet" --start-date 2023-09-01 --end-date 2023-09-03 --output-dir test_snr_epa_fixed --uncertainty-mode epa --snr-enable --write-diagnostics
+```
+
+**Impact**: EPA S/N categorization now fully operational with both legacy and EPA uncertainty modes. Bad species with poor data quality (>80% BDL) are automatically identified and excluded from analysis, resulting in cleaner PMF results. The pipeline successfully demonstrates the ability to:
+
+1. **Automatically identify problematic species** using EPA-recommended S/N thresholds
+2. **Apply appropriate handling** (triple uncertainty for weak, exclude for bad)
+3. **Maintain clean data matrices** without numerical convergence issues
+4. **Generate comprehensive diagnostics** showing categorization reasoning
+5. **Support both uncertainty calculation modes** (legacy and EPA)
+
+**Next Steps**: Ready for Commit 5 (A/B validation protocol).
+
+## 2025-09-21 18:50 - Commit 4: Comprehensive Dashboard Enhancement Complete ✅
+
+**Summary**: Implemented comprehensive dashboard enhancements with S/N categorization analysis, EPA policy transparency, enhanced Q/DoF diagnostics, and complete CLI reproducibility records.
+
+### Added
+- **S/N Categorization Analysis Plot**: 6-panel comprehensive analysis with:
+  - S/N by species bar chart with EPA thresholds (strong ≥2.0, weak 0.2-2.0, bad <0.2)
+  - BDL/missing fractions stacked bars with quality thresholds
+  - Mean concentration vs uncertainty scatter (log-log scale)
+  - Uncertainty distributions by species (boxplots with category colors)
+  - Impact of categorization showing 3x multipliers for weak species
+  - Category summary with species counts and breakdowns
+
+- **Enhanced HTML Dashboard**: Comprehensive configuration and policy sections
+  - **Run Configuration Panel**: Shows uncertainty mode, seed, record counts, species totals
+  - **EPA Policy Panel**: Displays formulas when EPA mode used (`U = √((EF×conc)² + (0.5×MDL)²)`)
+  - **Legacy Policy Panel**: Shows legacy methods when legacy mode used
+  - **S/N Categorization Summary**: Category breakdown with species table
+  - **Enhanced Model Performance**: Q/DoF interpretation with EPA quality guidelines
+  - **CLI Flags Record**: Complete reproducibility section with exact command
+
+- **Enhanced Q/DoF Optimization Plot**: Dual-panel plot with EPA reference lines
+  - Left panel: Q(robust) vs factors with selected factor annotation
+  - Right panel: Q/DoF ratios with EPA reference lines (1.0, 1.5, 2.0, 3.0)
+  - Quality annotations: Excellent/Good/Fair/Poor based on EPA guidelines
+  - Selected factor highlighted with quality assessment
+
+### Enhanced
+- **HTML Dashboard Layout**: Added consistent styling with color-coded categories
+  - Strong species: Green (#2ecc71)
+  - Weak species: Orange (#f39c12) 
+  - Bad species: Red (#e74c3c)
+  - Configuration sections with distinct background colors
+  - Species categorization table with S/N values and actions
+
+- **File Encoding**: Fixed Unicode encoding issue for emoji characters in HTML output
+  - Added UTF-8 encoding to HTML file writes
+  - Ensures cross-platform compatibility
+
+### Technical Implementation
+- `_create_snr_analysis_plots()`: 6-panel S/N analysis with consistent category colors
+- `_get_cli_flags_html_section()`: Complete CLI parameter reconstruction
+- Enhanced `_create_optimization_plot()`: Dual-panel Q/DoF with EPA references
+- Enhanced `_create_html_dashboard()`: Policy panels, configuration summaries, CLI record
+- Category color consistency across all S/N-related plots
+
+### Validation Results
+#### Dashboard Enhancement Test (MMF2, Sept 1-3, 2023):
+- **Total plots generated**: 16 (including new S/N analysis)
+- **S/N categorization**: 9 strong, 1 weak (H2S), 0 bad
+- **Weak species handling**: H2S uncertainty tripled (S/N = 1.192 < 2.0)
+- **PMF results**: 4 factors, Q/DoF = 0.388 (Excellent per EPA guidelines)
+- **Dashboard sections**: 6 major sections with complete transparency
+
+#### Files Generated:
+- `*_snr_analysis.png` - 6-panel S/N categorization analysis
+- `*_optimization_q_vs_factors.png` - Enhanced dual-panel Q/DoF plot
+- `*_pmf_dashboard.html` - Enhanced dashboard with policy transparency
+- `*_snr_metrics.csv` - S/N ratios and data quality metrics
+- `*_species_categories.csv` - Categorization results with reasoning
+- `*_categories.csv` - Simple species-category mapping
+
+### Dashboard Transparency Features
+1. **Configuration Transparency**: Shows exact uncertainty mode, parameters, and data processing
+2. **Policy Transparency**: EPA vs legacy formulas clearly explained
+3. **S/N Decision Transparency**: Every categorization decision justified with metrics
+4. **Model Quality Transparency**: Q/DoF interpretation with EPA guidelines
+5. **Reproducibility**: Complete CLI command provided for exact replication
+
+### User Experience Improvements
+- **Clear Visual Categorization**: Consistent colors across all S/N plots
+- **EPA Guideline Integration**: Reference lines and quality interpretations
+- **Complete Provenance**: CLI flags and parameter details for reproducibility
+- **Policy Context**: Formula explanations help users understand methodology
+- **Quality Assessment**: Q/DoF ratios interpreted according to EPA standards
+
+**Impact**: Dashboard now provides comprehensive transparency into EPA PMF 5.0 S/N categorization decisions, uncertainty calculation methods, and model quality assessment. Users can understand exactly why species were categorized as strong/weak/bad and reproduce analyses with identical parameters.
+
+**Test Command Used**:
+```bash
+python pmf_source_apportionment_fixed.py --data-dir mmf_test_30min --patterns "*mmf2*.parquet" --start-date 2023-09-01 --end-date 2023-09-03 --output-dir test_enhanced_dashboard --uncertainty-mode legacy --snr-enable --write-diagnostics
+```
+
+**Next Steps**: Ready for Commit 5 (A/B validation protocol comparing legacy vs EPA modes).

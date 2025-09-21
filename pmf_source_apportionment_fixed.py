@@ -60,6 +60,14 @@ except ImportError:
     HAS_EPA_UNCERTAINTY = False
     print("[WARNING] EPA uncertainty module not found. Only legacy uncertainty mode available.")
 
+# Import S/N categorization module  
+try:
+    from snr_categorization import create_snr_categorizer
+    HAS_SNR_CATEGORIZATION = True
+except ImportError:
+    HAS_SNR_CATEGORIZATION = False
+    print("[WARNING] S/N categorization module not found. Only non-categorized analysis available.")
+
 # Import ESAT modules
 try:
     import esat
@@ -529,6 +537,12 @@ class MMFPMFAnalyzer:
         # Generate uncertainty matrix following EPA guidelines
         self._generate_uncertainty_matrix(pollutant_columns)
         
+        # Apply S/N-based feature categorization if enabled
+        if self.snr_enable and HAS_SNR_CATEGORIZATION:
+            self._apply_snr_categorization(pollutant_columns)
+        elif self.snr_enable and not HAS_SNR_CATEGORIZATION:
+            print("⚠️ S/N categorization requested but module not available. Proceeding without categorization.")
+        
         # Save processed data
         self._save_processed_data()
     
@@ -597,6 +611,93 @@ class MMFPMFAnalyzer:
             for col, ou, f in conversions:
                 print(f"  - {col}: {ou} → μg/m³ (×{f})")
 
+    def _apply_snr_categorization(self, pollutant_columns):
+        """
+        Apply S/N-based feature categorization following EPA PMF 5.0 guidelines.
+        
+        This categorizes species as 'strong', 'weak', or 'bad' based on S/N ratio
+        and data quality metrics. Weak species have their uncertainty tripled,
+        while bad species are excluded from the analysis entirely.
+        """
+        print("🔢 Applying S/N-based feature categorization...")
+        
+        # Create EPA S/N categorizer with configured thresholds
+        categorizer = create_snr_categorizer(
+            snr_weak_threshold=self.snr_weak_threshold,
+            snr_bad_threshold=self.snr_bad_threshold,
+            bdl_weak_frac=self.snr_bdl_weak_frac,
+            bdl_bad_frac=self.snr_bdl_bad_frac,
+            missing_weak_frac=self.snr_missing_weak_frac,
+            missing_bad_frac=self.snr_missing_bad_frac
+        )
+        
+        # Get EPA calculator for MDL lookups if available
+        epa_calculator = None
+        if self.uncertainty_mode == 'epa' and HAS_EPA_UNCERTAINTY:
+            epa_calculator = create_epa_uncertainty_calculator(
+                epsilon=self.uncertainty_epsilon,
+                bdl_policy=self.uncertainty_bdl_policy,
+                ef_mdl_csv=self.uncertainty_ef_mdl
+            )
+        
+        # Compute S/N ratios and categorize species
+        metrics, categories, reasoning = categorizer.categorize_species(
+            self.concentration_data, 
+            self.uncertainty_data,
+            epa_calculator
+        )
+        
+        # Store categorization results
+        self._snr_metrics = metrics
+        self._snr_categories = categories
+        self._snr_reasoning = reasoning
+        
+        # Apply categorization (currently just modifies uncertainties)
+        # If ESAT integration is available in future, we'd apply via DataHandler here
+        print("🔄 Applying categorization to uncertainty matrix...")
+        
+        # Collect species to exclude
+        excluded_species = []
+        
+        for species, category in categories.items():
+            if category == 'weak':
+                # Triple uncertainties for weak species (EPA PMF 5.0 recommendation)
+                print(f"   ⚠️ {species}: Weak - tripling uncertainty")
+                self.uncertainty_data[species] = self.uncertainty_data[species] * 3.0
+            elif category == 'bad' and self.exclude_bad:
+                # Mark bad species for exclusion from analysis
+                print(f"   ❌ {species}: Bad - excluding from analysis")
+                excluded_species.append(species)
+        
+        # Remove bad species from data matrices
+        if excluded_species:
+            print(f"   🗑️ Removing {len(excluded_species)} bad species from matrices: {excluded_species}")
+            self.concentration_data = self.concentration_data.drop(columns=excluded_species)
+            self.uncertainty_data = self.uncertainty_data.drop(columns=excluded_species)
+            
+            # Also update counts data if available
+            if self.counts_data is not None:
+                # Drop corresponding n_* columns for excluded species
+                count_cols_to_drop = [f"n_{species}" for species in excluded_species if f"n_{species}" in self.counts_data.columns]
+                if count_cols_to_drop:
+                    self.counts_data = self.counts_data.drop(columns=count_cols_to_drop)
+                    print(f"   🗑️ Removed corresponding count columns: {count_cols_to_drop}")
+        
+        # Save diagnostics if requested
+        if self.write_diagnostics:
+            categorizer.save_diagnostics(self.output_dir, self.filename_prefix)
+        
+        # Summary report
+        summary = categorizer.get_summary()
+        if summary:
+            print(f"\n📊 S/N Categorization Summary:")
+            print(f"   Total species: {summary['total_species']}")
+            print(f"   Strong: {summary['strong_count']} species")
+            print(f"   Weak: {summary['weak_count']} species") 
+            print(f"   Bad: {summary['bad_count']} species")
+            print(f"   Average S/N: {summary['average_snr']:.3f}")
+            print(f"   Thresholds: weak={self.snr_weak_threshold}, bad={self.snr_bad_threshold}")
+    
     def _generate_uncertainty_matrix(self, pollutant_columns):
         """
         Generate uncertainty matrix using EPA or legacy mode based on configuration.
@@ -947,6 +1048,19 @@ class MMFPMFAnalyzer:
                 print(f"💾 Saved EPA uncertainties: {epa_unc_file}")
             except Exception as e:
                 print(f"⚠️ Could not save EPA uncertainties: {e}")
+        
+        # Save S/N categorization mapping if available
+        if getattr(self, 'write_diagnostics', True) and hasattr(self, '_snr_categories'):
+            try:
+                categories_file = self.output_dir / f"{self.filename_prefix}_categories.csv"
+                categories_df = pd.DataFrame({
+                    'species': list(self._snr_categories.keys()),
+                    'category': list(self._snr_categories.values())
+                })
+                categories_df.to_csv(categories_file, index=False)
+                print(f"💾 Saved species categories: {categories_file}")
+            except Exception as e:
+                print(f"⚠️ Could not save S/N categories: {e}")
     
     def run_pmf_analysis(self):
         """
@@ -1568,6 +1682,13 @@ class MMFPMFAnalyzer:
         except Exception as e:
             print(f"   ❌ Error creating Sankey diagram: {e}")
         
+        # NEW S/N Categorization and EPA Analysis Plots
+        if self.snr_enable and hasattr(self, '_snr_categories'):
+            try:
+                self._create_snr_analysis_plots(dashboard_dir, plot_files)
+            except Exception as e:
+                print(f"   ❌ Error creating S/N analysis plots: {e}")
+        
         # Plot 16: PCA vs PMF Comparison Plots (if PCA has been run)
         try:
             self._create_pca_comparison_plots(dashboard_dir, plot_files)
@@ -1578,6 +1699,314 @@ class MMFPMFAnalyzer:
         self._create_html_dashboard(plot_files)
         
         print(f"📊 Dashboard complete: {len(plot_files)} plots generated")
+    
+    def _create_snr_analysis_plots(self, dashboard_dir, plot_files):
+        """
+        Create comprehensive S/N categorization analysis plots and summaries.
+        """
+        print("   🔢 Creating S/N categorization analysis plots...")
+        
+        # Define consistent category colors
+        category_colors = {
+            'strong': '#2ecc71',  # Green
+            'weak': '#f39c12',    # Orange
+            'bad': '#e74c3c'      # Red
+        }
+        
+        # Load S/N metrics if available
+        snr_metrics_file = self.output_dir / f"{self.filename_prefix}_snr_metrics.csv"
+        categories_file = self.output_dir / f"{self.filename_prefix}_species_categories.csv"
+        
+        if not snr_metrics_file.exists():
+            print("   ⚠️ S/N metrics file not found, skipping S/N plots")
+            return
+        
+        snr_metrics = pd.read_csv(snr_metrics_file)
+        categories_df = pd.read_csv(categories_file) if categories_file.exists() else None
+        
+        # Create 2x3 subplot layout for S/N analysis
+        fig, axes = plt.subplots(2, 3, figsize=(20, 12))
+        fig.suptitle(f'{self.station} S/N Categorization Analysis (EPA PMF 5.0)', fontsize=16, fontweight='bold')
+        
+        # Plot 1: S/N by species (bar chart)
+        ax1 = axes[0, 0]
+        snr_metrics_sorted = snr_metrics.sort_values('snr', ascending=False)
+        colors = [category_colors.get(self._snr_categories.get(species, 'strong'), '#95a5a6') 
+                  for species in snr_metrics_sorted['species']]
+        
+        bars = ax1.bar(range(len(snr_metrics_sorted)), snr_metrics_sorted['snr'], color=colors, alpha=0.8)
+        ax1.axhline(y=self.snr_weak_threshold, color='orange', linestyle='--', alpha=0.7, label=f'Weak threshold ({self.snr_weak_threshold})')
+        ax1.axhline(y=self.snr_bad_threshold, color='red', linestyle='--', alpha=0.7, label=f'Bad threshold ({self.snr_bad_threshold})')
+        ax1.set_title('Signal-to-Noise Ratio by Species')
+        ax1.set_ylabel('S/N Ratio')
+        ax1.set_xticks(range(len(snr_metrics_sorted)))
+        ax1.set_xticklabels(snr_metrics_sorted['species'], rotation=45, ha='right')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+        
+        # Plot 2: BDL and Missing fractions (stacked bar)
+        ax2 = axes[0, 1]
+        species_order = snr_metrics_sorted['species']
+        bdl_fracs = [snr_metrics[snr_metrics['species'] == sp]['bdl_frac'].iloc[0] for sp in species_order]
+        missing_fracs = [snr_metrics[snr_metrics['species'] == sp]['missing_frac'].iloc[0] for sp in species_order]
+        valid_fracs = [1 - bdl - missing for bdl, missing in zip(bdl_fracs, missing_fracs)]
+        
+        x_pos = range(len(species_order))
+        ax2.bar(x_pos, valid_fracs, label='Valid', color='#27ae60', alpha=0.8)
+        ax2.bar(x_pos, bdl_fracs, bottom=valid_fracs, label='BDL', color='#e67e22', alpha=0.8)
+        ax2.bar(x_pos, missing_fracs, bottom=[v + b for v, b in zip(valid_fracs, bdl_fracs)], 
+               label='Missing', color='#95a5a6', alpha=0.8)
+        
+        ax2.axhline(y=1-self.snr_bdl_bad_frac, color='red', linestyle='--', alpha=0.7, 
+                   label=f'Bad BDL threshold ({self.snr_bdl_bad_frac*100:.0f}%)')
+        ax2.axhline(y=1-self.snr_bdl_weak_frac, color='orange', linestyle='--', alpha=0.7,
+                   label=f'Weak BDL threshold ({self.snr_bdl_weak_frac*100:.0f}%)')
+        
+        ax2.set_title('Data Quality Fractions by Species')
+        ax2.set_ylabel('Fraction')
+        ax2.set_xticks(x_pos)
+        ax2.set_xticklabels(species_order, rotation=45, ha='right')
+        ax2.legend()
+        ax2.grid(True, alpha=0.3)
+        
+        # Plot 3: Mean concentration vs uncertainty scatter
+        ax3 = axes[0, 2]
+        conc_file = self.output_dir / f"{self.filename_prefix}_concentrations.csv"
+        unc_file = self.output_dir / f"{self.filename_prefix}_uncertainties.csv"
+        
+        if conc_file.exists() and unc_file.exists():
+            conc_data = pd.read_csv(conc_file, index_col=0)
+            unc_data = pd.read_csv(unc_file, index_col=0)
+            
+            mean_concs = conc_data.mean()
+            mean_uncs = unc_data.mean()
+            
+            for species in mean_concs.index:
+                if species in self._snr_categories:
+                    category = self._snr_categories[species]
+                    color = category_colors.get(category, '#95a5a6')
+                    ax3.scatter(mean_concs[species], mean_uncs[species], 
+                              c=color, s=100, alpha=0.7, label=category if category not in ax3.get_legend_handles_labels()[1] else "")
+                    ax3.annotate(species, (mean_concs[species], mean_uncs[species]), 
+                               xytext=(5, 5), textcoords='offset points', fontsize=8)
+            
+            ax3.set_xscale('log')
+            ax3.set_yscale('log')
+            ax3.set_title('Mean Concentration vs Mean Uncertainty')
+            ax3.set_xlabel('Mean Concentration (μg/m³)')
+            ax3.set_ylabel('Mean Uncertainty (μg/m³)')
+            ax3.legend()
+            ax3.grid(True, alpha=0.3)
+        
+        # Plot 4: Uncertainty distribution by species (boxplot)
+        ax4 = axes[1, 0]
+        if unc_file.exists():
+            species_uncs = []
+            species_labels = []
+            species_colors_list = []
+            
+            for species in unc_data.columns:
+                if species in self._snr_categories:
+                    species_uncs.append(unc_data[species].dropna())
+                    species_labels.append(species)
+                    species_colors_list.append(category_colors.get(self._snr_categories[species], '#95a5a6'))
+            
+            if species_uncs:
+                bp = ax4.boxplot(species_uncs, labels=species_labels, patch_artist=True)
+                for patch, color in zip(bp['boxes'], species_colors_list):
+                    patch.set_facecolor(color)
+                    patch.set_alpha(0.7)
+                
+                ax4.set_title('Uncertainty Distributions by Species')
+                ax4.set_ylabel('Uncertainty (μg/m³)')
+                ax4.set_yscale('log')
+                plt.setp(ax4.get_xticklabels(), rotation=45, ha='right')
+                ax4.grid(True, alpha=0.3)
+        
+        # Plot 5: Impact of categorization (weak species only)
+        ax5 = axes[1, 1]
+        weak_species = [sp for sp, cat in self._snr_categories.items() if cat == 'weak']
+        
+        if weak_species:
+            # Show the 3x uncertainty multiplier for weak species
+            ratios = [3.0] * len(weak_species)  # All weak species get 3x uncertainty
+            bars = ax5.bar(range(len(weak_species)), ratios, 
+                          color=category_colors['weak'], alpha=0.8)
+            ax5.axhline(y=3.0, color='orange', linestyle='--', alpha=0.7, label='Applied multiplier')
+            ax5.set_title('Applied Uncertainty Scaling for Weak Species')
+            ax5.set_ylabel('Uncertainty Multiplier')
+            ax5.set_xticks(range(len(weak_species)))
+            ax5.set_xticklabels(weak_species, rotation=45, ha='right')
+            ax5.legend()
+            ax5.grid(True, alpha=0.3)
+            
+            # Annotate bars
+            for i, bar in enumerate(bars):
+                height = bar.get_height()
+                ax5.text(bar.get_x() + bar.get_width()/2., height + 0.05,
+                        '3.0x', ha='center', va='bottom', fontweight='bold')
+        else:
+            ax5.text(0.5, 0.5, 'No weak species\nidentified', ha='center', va='center',
+                    transform=ax5.transAxes, fontsize=14)
+            ax5.set_title('Applied Uncertainty Scaling for Weak Species')
+        
+        # Plot 6: Category summary and reasons
+        ax6 = axes[1, 2]
+        if categories_df is not None and 'reasons' in categories_df.columns:
+            # Count reason types
+            reason_counts = {'S/N < threshold': 0, 'BDL > threshold': 0, 'Missing > threshold': 0, 'Other': 0}
+            
+            for reasons_str in categories_df['reasons'].fillna(''):
+                if 'S/N <' in reasons_str:
+                    reason_counts['S/N < threshold'] += 1
+                elif 'BDL >' in reasons_str:
+                    reason_counts['BDL > threshold'] += 1
+                elif 'Missing >' in reasons_str:
+                    reason_counts['Missing > threshold'] += 1
+                elif reasons_str.strip():  # Non-empty but not matching above
+                    reason_counts['Other'] += 1
+            
+            # Create stacked bar showing categorization reasons
+            categories = list(self._snr_categories.values())
+            cat_counts = {'strong': categories.count('strong'), 
+                         'weak': categories.count('weak'), 
+                         'bad': categories.count('bad')}
+            
+            bars = ax6.bar(cat_counts.keys(), cat_counts.values(), 
+                          color=[category_colors[cat] for cat in cat_counts.keys()], alpha=0.8)
+            ax6.set_title('Species Categorization Summary')
+            ax6.set_ylabel('Number of Species')
+            ax6.grid(True, alpha=0.3)
+            
+            # Annotate bars with counts
+            for i, (cat, count) in enumerate(cat_counts.items()):
+                if count > 0:
+                    ax6.text(i, count + 0.1, str(count), ha='center', va='bottom', fontweight='bold')
+        
+        plt.tight_layout()
+        plot_path = dashboard_dir / f"{self.filename_prefix}_snr_analysis.png"
+        plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
+        plt.close()
+        plot_files.append(plot_path)
+        print(f"   ✅ Saved: snr_analysis.png")
+    
+    def _get_cli_flags_html_section(self):
+        """
+        Generate HTML section with complete CLI flags record for reproducibility.
+        """
+        # Get all CLI parameters with current values
+        cli_params = {
+            # Core parameters
+            'station': getattr(self, 'station', None),
+            'data_dir': getattr(self, 'data_dir', None),
+            'patterns': getattr(self, 'patterns', None),
+            'start_date': self.start_date,
+            'end_date': self.end_date,
+            'output_dir': str(self.output_dir),
+            'remove_voc': getattr(self, 'remove_voc', False),
+            
+            # EPA uncertainty parameters
+            'uncertainty_mode': self.uncertainty_mode,
+            'uncertainty_ef_mdl': self.uncertainty_ef_mdl,
+            'uncertainty_epsilon': self.uncertainty_epsilon,
+            'legacy_min_u': self.legacy_min_u,
+            'uncertainty_bdl_policy': self.uncertainty_bdl_policy,
+            
+            # S/N categorization parameters
+            'snr_enable': self.snr_enable,
+            'snr_weak_threshold': self.snr_weak_threshold,
+            'snr_bad_threshold': self.snr_bad_threshold,
+            'snr_bdl_weak_frac': self.snr_bdl_weak_frac,
+            'snr_bdl_bad_frac': self.snr_bdl_bad_frac,
+            'snr_missing_weak_frac': self.snr_missing_weak_frac,
+            'snr_missing_bad_frac': self.snr_missing_bad_frac,
+            'exclude_bad': self.exclude_bad,
+            
+            # Output controls
+            'dashboard_snr_panel': getattr(self, 'dashboard_snr_panel', True),
+            'write_diagnostics': self.write_diagnostics,
+            'seed': self.seed,
+        }
+        
+        html_section = """
+            <div class="cli-section">
+                <h2>📋 CLI Flags Used (Reproducibility Record)</h2>
+                <p><strong>Command to reproduce this analysis:</strong></p>
+                <pre style="background-color: #f8f8f8; padding: 10px; border-radius: 3px; overflow-x: auto;">
+        """
+        
+        # Build command line
+        cmd_parts = ['python pmf_source_apportionment_fixed.py']
+        
+        if cli_params['station']:
+            cmd_parts.append(f"--station {cli_params['station']}")
+        if cli_params['data_dir']:
+            cmd_parts.append(f'--data-dir "{cli_params["data_dir"]}"')
+        if cli_params['patterns']:
+            cmd_parts.append(f'--patterns "{cli_params["patterns"]}"')
+        if cli_params['start_date']:
+            cmd_parts.append(f"--start-date {cli_params['start_date']}")
+        if cli_params['end_date']:
+            cmd_parts.append(f"--end-date {cli_params['end_date']}")
+        if cli_params['output_dir'] and cli_params['output_dir'] != 'pmf_results':
+            cmd_parts.append(f'--output-dir "{cli_params["output_dir"]}"')
+        if cli_params['remove_voc']:
+            cmd_parts.append('--remove-voc')
+        if cli_params['uncertainty_mode'] != 'legacy':
+            cmd_parts.append(f"--uncertainty-mode {cli_params['uncertainty_mode']}")
+        if cli_params['snr_enable']:
+            cmd_parts.append('--snr-enable')
+        if cli_params['write_diagnostics']:
+            cmd_parts.append('--write-diagnostics')
+        
+        # Add other non-default parameters
+        non_defaults = {
+            'uncertainty_epsilon': (1e-12, cli_params['uncertainty_epsilon']),
+            'legacy_min_u': (0.1, cli_params['legacy_min_u']),
+            'snr_weak_threshold': (2.0, cli_params['snr_weak_threshold']),
+            'snr_bad_threshold': (0.2, cli_params['snr_bad_threshold']),
+            'seed': (42, cli_params['seed']),
+        }
+        
+        for param, (default, value) in non_defaults.items():
+            if value != default:
+                cmd_parts.append(f"--{param.replace('_', '-')} {value}")
+        
+        # Format command with line breaks for readability
+        cmd_str = ' \\\n    '.join(cmd_parts)
+        
+        html_section += cmd_str
+        html_section += """
+                </pre>
+                
+                <h3>Parameter Details:</h3>
+                <table>
+                    <tr><th>Parameter</th><th>Value</th><th>Description</th></tr>
+        """
+        
+        # Parameter descriptions
+        param_descriptions = {
+            'uncertainty_mode': f'{cli_params["uncertainty_mode"]} - Uncertainty calculation method',
+            'snr_enable': f'{cli_params["snr_enable"]} - EPA S/N-based feature categorization',
+            'snr_weak_threshold': f'{cli_params["snr_weak_threshold"]} - S/N threshold for weak species',
+            'snr_bad_threshold': f'{cli_params["snr_bad_threshold"]} - S/N threshold for bad species',
+            'exclude_bad': f'{cli_params["exclude_bad"]} - Exclude bad species from analysis',
+            'seed': f'{cli_params["seed"]} - Random seed for reproducibility',
+            'write_diagnostics': f'{cli_params["write_diagnostics"]} - Write diagnostic CSV files',
+        }
+        
+        for param, desc in param_descriptions.items():
+            html_section += f"""
+                    <tr><td>--{param.replace('_', '-')}</td><td>{desc}</td></tr>
+            """
+        
+        html_section += """
+                </table>
+                <p><small><em>Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</em></small></p>
+            </div>
+        """
+        
+        return html_section
     
     def _create_html_dashboard(self, plot_files):
         """Create HTML dashboard combining all plots."""
@@ -1595,6 +2024,16 @@ class MMFPMFAnalyzer:
                 .plot-container {{ margin: 20px 0; text-align: center; }}
                 .plot-container img {{ max-width: 100%; height: auto; border: 1px solid #ddd; }}
                 .summary {{ background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0; }}
+                .config-section {{ background-color: #e8f4fd; padding: 15px; border-radius: 5px; margin: 20px 0; }}
+                .epa-section {{ background-color: #fff2e6; padding: 15px; border-radius: 5px; margin: 20px 0; }}
+                .snr-section {{ background-color: #f0f8f0; padding: 15px; border-radius: 5px; margin: 20px 0; }}
+                .cli-section {{ background-color: #f9f9f9; padding: 15px; border-radius: 5px; margin: 20px 0; font-family: monospace; }}
+                .category-strong {{ color: #2ecc71; font-weight: bold; }}
+                .category-weak {{ color: #f39c12; font-weight: bold; }}
+                .category-bad {{ color: #e74c3c; font-weight: bold; }}
+                table {{ border-collapse: collapse; margin: 10px 0; }}
+                th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+                th {{ background-color: #f2f2f2; }}
             </style>
         </head>
         <body>
@@ -1606,13 +2045,150 @@ class MMFPMFAnalyzer:
                 <p><strong>Models Run:</strong> {self.models}</p>
             </div>
             
+            <div class="config-section">
+                <h2>🔧 Run Configuration</h2>
+                <ul>
+                    <li><strong>Uncertainty Mode:</strong> {self.uncertainty_mode} 
+                        {('(EPA PMF 5.0 formulas)' if self.uncertainty_mode == 'epa' else '(Fixed MDL/EF table)')}</li>
+                    <li><strong>Random Seed:</strong> {self.seed}</li>
+                    <li><strong>Records Analyzed:</strong> {len(self.concentration_data):,}</li>
+                    <li><strong>Original Species:</strong> {len(self.concentration_data.columns) + (len(getattr(self, '_excluded_species', [])))} 
+                        {'(' + str(len(getattr(self, '_excluded_species', []))) + ' excluded)' if hasattr(self, '_excluded_species') and len(getattr(self, '_excluded_species', [])) > 0 else ''}</li>
+                    <li><strong>Final Species:</strong> {len(self.concentration_data.columns)}</li>
+                </ul>
+            </div>
+        """
+        
+        # Add EPA policy section if using EPA mode
+        if self.uncertainty_mode == 'epa':
+            html_content += f"""
+            <div class="epa-section">
+                <h2>🏧 EPA Uncertainty Policy (PMF 5.0)</h2>
+                <ul>
+                    <li><strong>Above MDL:</strong> U = √((EF × conc)² + (0.5 × MDL)²)</li>
+                    <li><strong>BDL Cases:</strong> V = MDL/2, U = {self.uncertainty_bdl_policy.replace('-', ' ').title()}</li>
+                    <li><strong>Missing Cases:</strong> V = MDL, U = 4 × MDL</li>
+                    <li><strong>EF/MDL Source:</strong> {'Built-in database' if not self.uncertainty_ef_mdl else f'Custom CSV: {self.uncertainty_ef_mdl}'}</li>
+                    <li><strong>Aggregation Scaling:</strong> Already included in EPA formulas</li>
+                </ul>
+            </div>
+            """
+        else:
+            html_content += f"""
+            <div class="epa-section">
+                <h2>🏧 Legacy Uncertainty Policy</h2>
+                <ul>
+                    <li><strong>Method:</strong> Fixed MDL/Error Fraction table</li>
+                    <li><strong>Above MDL:</strong> U = √((EF × conc)² + MDL²)</li>
+                    <li><strong>BDL/Missing:</strong> V = MDL/2, U = (5/6) × MDL</li>
+                    <li><strong>Minimum Uncertainty:</strong> {self.legacy_min_u}</li>
+                    <li><strong>Aggregation Scaling:</strong> Applied as 1/√n after uncertainty calculation</li>
+                </ul>
+            </div>
+            """
+        
+        # Add S/N categorization section if enabled
+        if self.snr_enable and hasattr(self, '_snr_categories'):
+            # Count categories
+            strong_count = sum(1 for cat in self._snr_categories.values() if cat == 'strong')
+            weak_count = sum(1 for cat in self._snr_categories.values() if cat == 'weak')
+            bad_count = sum(1 for cat in self._snr_categories.values() if cat == 'bad')
+            
+            # Get average S/N
+            if hasattr(self, '_snr_metrics'):
+                avg_snr = sum(m['snr'] for m in self._snr_metrics.values()) / len(self._snr_metrics)
+            else:
+                avg_snr = 0.0
+            
+            html_content += f"""
+            <div class="snr-section">
+                <h2>🔢 S/N Categorization Summary (EPA PMF 5.0)</h2>
+                <ul>
+                    <li><strong>Total Species:</strong> {len(self._snr_categories)}</li>
+                    <li><strong>Average S/N:</strong> {avg_snr:.3f}</li>
+                    <li><strong>Thresholds:</strong> Strong ≥ {self.snr_weak_threshold}, Weak {self.snr_bad_threshold}-{self.snr_weak_threshold}, Bad < {self.snr_bad_threshold}</li>
+                </ul>
+                <h3>Category Breakdown:</h3>
+                <ul>
+                    <li><span class="category-strong">Strong: {strong_count} species</span> (normal weighting)</li>
+                    <li><span class="category-weak">Weak: {weak_count} species</span> (uncertainty × 3)</li>
+                    <li><span class="category-bad">Bad: {bad_count} species</span> (excluded from analysis)</li>
+                </ul>
+            """
+            
+            # Add species categorization table
+            if hasattr(self, '_snr_categories'):
+                html_content += """
+                <h3>Species Categories:</h3>
+                <table>
+                    <tr><th>Species</th><th>Category</th><th>S/N</th><th>Action</th></tr>
+                """
+                
+                # Load S/N metrics if available
+                snr_metrics_file = self.output_dir / f"{self.filename_prefix}_snr_metrics.csv"
+                snr_dict = {}
+                if snr_metrics_file.exists():
+                    snr_data = pd.read_csv(snr_metrics_file)
+                    snr_dict = dict(zip(snr_data['species'], snr_data['snr']))
+                
+                for species, category in sorted(self._snr_categories.items()):
+                    snr_value = snr_dict.get(species, 0.0)
+                    if category == 'strong':
+                        action = 'Normal weighting'
+                    elif category == 'weak':
+                        action = 'Uncertainty tripled'
+                    else:  # bad
+                        action = 'Excluded from analysis'
+                    
+                    html_content += f"""
+                    <tr>
+                        <td>{species}</td>
+                        <td><span class="category-{category}">{category.title()}</span></td>
+                        <td>{snr_value:.3f}</td>
+                        <td>{action}</td>
+                    </tr>
+                    """
+                
+                html_content += "</table>"
+            
+            html_content += "</div>"
+        
+        html_content += """
             <div class="summary">
-                <h2>Analysis Summary</h2>
+                <h2>Model Performance</h2>
                 <ul>
                     <li><strong>Q(true):</strong> {self.best_model.Qtrue:.2f}</li>
                     <li><strong>Q(robust):</strong> {self.best_model.Qrobust:.2f}</li>
-                    <li><strong>Data Records:</strong> {len(self.concentration_data):,}</li>
-                    <li><strong>Species Analyzed:</strong> {len(self.concentration_data.columns)}</li>
+        """
+        
+        # Add Q/DoF interpretation if DoF available
+        if hasattr(self.best_model, 'Qtrue') and hasattr(self.best_model, 'Qrobust'):
+            try:
+                # Calculate DoF
+                n_samples = len(self.concentration_data)
+                n_species = len(self.concentration_data.columns)
+                n_factors = self.factors
+                dof = n_samples * n_species - n_factors * (n_samples + n_species)
+                
+                if dof > 0:
+                    q_dof_ratio = self.best_model.Qrobust / dof
+                    if q_dof_ratio <= 1.5:
+                        quality = "Excellent"
+                    elif q_dof_ratio <= 2.0:
+                        quality = "Good"
+                    elif q_dof_ratio <= 3.0:
+                        quality = "Fair"
+                    else:
+                        quality = "Poor"
+                    
+                    html_content += f"""
+                    <li><strong>DoF:</strong> {dof:,}</li>
+                    <li><strong>Q/DoF Ratio:</strong> {q_dof_ratio:.3f} ({quality} per EPA guidelines)</li>
+                    """
+            except:
+                pass
+        
+        html_content += """
                 </ul>
             </div>
         """
@@ -1630,11 +2206,14 @@ class MMFPMFAnalyzer:
             </div>
             """
         
+        # Add CLI flags record at bottom
+        html_content += self._get_cli_flags_html_section()
+        
         html_content += "</body></html>"
         
         # Save HTML dashboard
         html_file = self.output_dir / f"{self.filename_prefix}_pmf_dashboard.html"
-        with open(html_file, 'w') as f:
+        with open(html_file, 'w', encoding='utf-8') as f:
             f.write(html_content)
         
         print(f"📄 HTML Dashboard: {html_file}")
@@ -2338,7 +2917,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         print(f"   ✅ Saved: diagnostic_scatters.png")
     
     def _create_optimization_plot(self, dashboard_dir, plot_files):
-        """Create Q(robust) vs number of factors optimization plot."""
+        """Create enhanced Q(robust) vs number of factors optimization plot with EPA reference lines."""
         print("   🔢 Creating factor optimization plot...")
         
         # Check if optimization data is available
@@ -2346,46 +2925,116 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
             print("   ⚠️ No optimization data available - skipping optimization plot")
             return
         
-        fig, ax = plt.subplots(figsize=(10, 6))
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+        fig.suptitle(f'{self.station} PMF Factor Optimization Analysis', fontsize=16, fontweight='bold')
         
         # Extract factor numbers and Q-values
         factors = sorted(self.optimization_q_values.keys())
         q_values = [self.optimization_q_values[f] for f in factors]
         
-        # Plot Q(robust) vs factors
-        ax.plot(factors, q_values, 'o-', linewidth=2, markersize=8, alpha=0.7, color='blue')
+        # Calculate Q/DoF ratios for each factor count
+        n_samples = len(self.concentration_data)
+        n_species = len(self.concentration_data.columns)
+        
+        q_dof_ratios = []
+        for n_factors in factors:
+            try:
+                dof = n_samples * n_species - n_factors * (n_samples + n_species)
+                if dof > 0:
+                    q_dof_ratios.append(self.optimization_q_values[n_factors] / dof)
+                else:
+                    q_dof_ratios.append(float('inf'))
+            except:
+                q_dof_ratios.append(float('inf'))
+        
+        # Plot 1: Q(robust) vs factors
+        ax1.plot(factors, q_values, 'o-', linewidth=2, markersize=8, alpha=0.7, color='blue', label='Q(robust)')
         
         # Highlight the selected optimal factor
         if hasattr(self, 'optimal_factors') and self.optimal_factors:
             optimal_q = self.optimization_q_values[self.optimal_factors]
-            ax.plot(self.optimal_factors, optimal_q, 'ro', markersize=12, 
+            ax1.plot(self.optimal_factors, optimal_q, 'ro', markersize=12, 
                    label=f'Selected: {self.optimal_factors} factors', zorder=5)
             
             # Add annotation
-            ax.annotate(f'Optimal\n{self.optimal_factors} factors\nQ = {optimal_q:.1f}',
+            ax1.annotate(f'Selected\n{self.optimal_factors} factors\nQ = {optimal_q:.1f}',
                        xy=(self.optimal_factors, optimal_q),
                        xytext=(10, 20), textcoords='offset points',
                        bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.7),
                        arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0'))
         
-        # Formatting
-        ax.set_xlabel('Number of Factors', fontsize=12, fontweight='bold')
-        ax.set_ylabel('Q(robust)', fontsize=12, fontweight='bold')
-        ax.set_title(f'{self.station} PMF Factor Optimization\nQ(robust) vs Number of Factors', 
-                    fontsize=14, fontweight='bold')
-        ax.grid(True, alpha=0.3)
-        ax.legend(fontsize=10)
+        ax1.set_xlabel('Number of Factors')
+        ax1.set_ylabel('Q(robust)')
+        ax1.set_title('Q(robust) vs Number of Factors')
+        ax1.grid(True, alpha=0.3)
+        ax1.legend()
+        ax1.set_xticks(factors)
         
-        # Set integer ticks for x-axis
-        ax.set_xticks(factors)
-        ax.set_xlim(min(factors) - 0.5, max(factors) + 0.5)
+        # Plot 2: Q/DoF ratios with EPA reference lines
+        valid_ratios = [(f, r) for f, r in zip(factors, q_dof_ratios) if r != float('inf')]
+        if valid_ratios:
+            valid_factors, valid_ratios = zip(*valid_ratios)
+            ax2.plot(valid_factors, valid_ratios, 'o-', linewidth=2, markersize=8, alpha=0.7, color='green', label='Q/DoF Ratio')
+            
+            # Add EPA reference lines
+            ax2.axhline(y=1.0, color='black', linestyle='-', alpha=0.8, linewidth=2, label='Q/DoF = 1.0 (Perfect fit)')
+            ax2.axhline(y=1.5, color='green', linestyle='--', alpha=0.7, label='Q/DoF = 1.5 (Excellent)')
+            ax2.axhline(y=2.0, color='orange', linestyle='--', alpha=0.7, label='Q/DoF = 2.0 (Good)')
+            ax2.axhline(y=3.0, color='red', linestyle='--', alpha=0.7, label='Q/DoF = 3.0 (Fair)')
+            
+            # Highlight selected factor on Q/DoF plot
+            if hasattr(self, 'optimal_factors') and self.optimal_factors:
+                try:
+                    selected_idx = list(valid_factors).index(self.optimal_factors)
+                    selected_ratio = valid_ratios[selected_idx]
+                    ax2.plot(self.optimal_factors, selected_ratio, 'ro', markersize=12, zorder=5)
+                    
+                    # Determine quality based on EPA guidelines
+                    if selected_ratio <= 1.5:
+                        quality = "Excellent"
+                        color = 'green'
+                    elif selected_ratio <= 2.0:
+                        quality = "Good"
+                        color = 'orange'
+                    elif selected_ratio <= 3.0:
+                        quality = "Fair"
+                        color = 'red'
+                    else:
+                        quality = "Poor"
+                        color = 'darkred'
+                    
+                    ax2.annotate(f'Selected\n{self.optimal_factors} factors\nQ/DoF = {selected_ratio:.3f}\n({quality})',
+                               xy=(self.optimal_factors, selected_ratio),
+                               xytext=(-30, 20), textcoords='offset points',
+                               bbox=dict(boxstyle='round,pad=0.3', facecolor=color, alpha=0.3),
+                               arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0'))
+                except (ValueError, IndexError):
+                    pass
+            
+            ax2.set_xlabel('Number of Factors')
+            ax2.set_ylabel('Q/DoF Ratio')
+            ax2.set_title('Q/DoF Ratio vs Number of Factors (EPA Guidelines)')
+            ax2.grid(True, alpha=0.3)
+            ax2.legend(fontsize=8, loc='upper right')
+            ax2.set_xticks(list(valid_factors))
+            
+            # Set y-axis limits for better visualization
+            max_ratio = max([r for r in valid_ratios if r != float('inf')])
+            ax2.set_ylim(0, min(max_ratio * 1.1, 5))  # Cap at 5 for readability
+        
+        else:
+            ax2.text(0.5, 0.5, 'No valid Q/DoF ratios\n(DoF ≤ 0 for all factor counts)', 
+                    ha='center', va='center', transform=ax2.transAxes, fontsize=12)
+            ax2.set_title('Q/DoF Ratio vs Number of Factors')
         
         # Add explanatory text
-        textstr = ('Lower Q(robust) indicates better fit.\n'
-                  'Selected value represents optimal balance\n'
-                  'between model complexity and goodness-of-fit.')
+        textstr = ('EPA PMF 5.0 Guidelines:\n'
+                  'Q/DoF ≤ 1.5: Excellent fit\n'
+                  'Q/DoF ≤ 2.0: Good fit\n'
+                  'Q/DoF ≤ 3.0: Fair fit\n'
+                  'Q/DoF > 3.0: Poor fit')
         props = dict(boxstyle='round', facecolor='lightblue', alpha=0.5)
-        ax.text(0.02, 0.98, textstr, transform=ax.transAxes, fontsize=9,
+        ax1.text(0.02, 0.98, textstr, transform=ax1.transAxes, fontsize=8,
                verticalalignment='top', bbox=props)
         
         plt.tight_layout()

@@ -1,0 +1,272 @@
+
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>None PMF Source Apportionment Dashboard</title>
+            <style>
+                body { font-family: Arial, sans-serif; margin: 20px; }
+                .header { text-align: center; margin-bottom: 30px; }
+                .plot-container { margin: 20px 0; text-align: center; }
+                .plot-container img { max-width: 100%; height: auto; border: 1px solid #ddd; }
+                .summary { background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0; }
+                .config-section { background-color: #e8f4fd; padding: 15px; border-radius: 5px; margin: 20px 0; }
+                .epa-section { background-color: #fff2e6; padding: 15px; border-radius: 5px; margin: 20px 0; }
+                .snr-section { background-color: #f0f8f0; padding: 15px; border-radius: 5px; margin: 20px 0; }
+                .cli-section { background-color: #f9f9f9; padding: 15px; border-radius: 5px; margin: 20px 0; font-family: monospace; }
+                .category-strong { color: #2ecc71; font-weight: bold; }
+                .category-weak { color: #f39c12; font-weight: bold; }
+                .category-bad { color: #e74c3c; font-weight: bold; }
+                table { border-collapse: collapse; margin: 10px 0; }
+                th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                th { background-color: #f2f2f2; }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h1>None PMF Source Apportionment Analysis</h1>
+                <p><strong>Analysis Date:</strong> 2025-09-21 18:48</p>
+                <p><strong>Data Period:</strong> 2023-09-01 to 2023-09-03</p>
+                <p><strong>Factors Resolved:</strong> 4</p>
+                <p><strong>Models Run:</strong> 20</p>
+            </div>
+            
+            <div class="config-section">
+                <h2>🔧 Run Configuration</h2>
+                <ul>
+                    <li><strong>Uncertainty Mode:</strong> legacy 
+                        (Fixed MDL/EF table)</li>
+                    <li><strong>Random Seed:</strong> 42</li>
+                    <li><strong>Records Analyzed:</strong> 93</li>
+                    <li><strong>Original Species:</strong> 10 
+                        </li>
+                    <li><strong>Final Species:</strong> 10</li>
+                </ul>
+            </div>
+        
+            <div class="epa-section">
+                <h2>🏧 Legacy Uncertainty Policy</h2>
+                <ul>
+                    <li><strong>Method:</strong> Fixed MDL/Error Fraction table</li>
+                    <li><strong>Above MDL:</strong> U = √((EF × conc)² + MDL²)</li>
+                    <li><strong>BDL/Missing:</strong> V = MDL/2, U = (5/6) × MDL</li>
+                    <li><strong>Minimum Uncertainty:</strong> 0.1</li>
+                    <li><strong>Aggregation Scaling:</strong> Applied as 1/√n after uncertainty calculation</li>
+                </ul>
+            </div>
+            
+            <div class="snr-section">
+                <h2>🔢 S/N Categorization Summary (EPA PMF 5.0)</h2>
+                <ul>
+                    <li><strong>Total Species:</strong> 10</li>
+                    <li><strong>Average S/N:</strong> 5.601</li>
+                    <li><strong>Thresholds:</strong> Strong ≥ 2.0, Weak 0.2-2.0, Bad < 0.2</li>
+                </ul>
+                <h3>Category Breakdown:</h3>
+                <ul>
+                    <li><span class="category-strong">Strong: 9 species</span> (normal weighting)</li>
+                    <li><span class="category-weak">Weak: 1 species</span> (uncertainty × 3)</li>
+                    <li><span class="category-bad">Bad: 0 species</span> (excluded from analysis)</li>
+                </ul>
+            
+                <h3>Species Categories:</h3>
+                <table>
+                    <tr><th>Species</th><th>Category</th><th>S/N</th><th>Action</th></tr>
+                
+                    <tr>
+                        <td>CH4</td>
+                        <td><span class="category-strong">Strong</span></td>
+                        <td>9.585</td>
+                        <td>Normal weighting</td>
+                    </tr>
+                    
+                    <tr>
+                        <td>H2S</td>
+                        <td><span class="category-weak">Weak</span></td>
+                        <td>1.192</td>
+                        <td>Uncertainty tripled</td>
+                    </tr>
+                    
+                    <tr>
+                        <td>NO</td>
+                        <td><span class="category-strong">Strong</span></td>
+                        <td>4.652</td>
+                        <td>Normal weighting</td>
+                    </tr>
+                    
+                    <tr>
+                        <td>NO2</td>
+                        <td><span class="category-strong">Strong</span></td>
+                        <td>4.875</td>
+                        <td>Normal weighting</td>
+                    </tr>
+                    
+                    <tr>
+                        <td>NOX</td>
+                        <td><span class="category-strong">Strong</span></td>
+                        <td>4.866</td>
+                        <td>Normal weighting</td>
+                    </tr>
+                    
+                    <tr>
+                        <td>PM1 FIDAS</td>
+                        <td><span class="category-strong">Strong</span></td>
+                        <td>6.639</td>
+                        <td>Normal weighting</td>
+                    </tr>
+                    
+                    <tr>
+                        <td>PM10 FIDAS</td>
+                        <td><span class="category-strong">Strong</span></td>
+                        <td>7.854</td>
+                        <td>Normal weighting</td>
+                    </tr>
+                    
+                    <tr>
+                        <td>PM2.5 FIDAS</td>
+                        <td><span class="category-strong">Strong</span></td>
+                        <td>7.012</td>
+                        <td>Normal weighting</td>
+                    </tr>
+                    
+                    <tr>
+                        <td>PM4 FIDAS</td>
+                        <td><span class="category-strong">Strong</span></td>
+                        <td>5.465</td>
+                        <td>Normal weighting</td>
+                    </tr>
+                    
+                    <tr>
+                        <td>TSP FIDAS</td>
+                        <td><span class="category-strong">Strong</span></td>
+                        <td>3.869</td>
+                        <td>Normal weighting</td>
+                    </tr>
+                    </table></div>
+            <div class="summary">
+                <h2>Model Performance</h2>
+                <ul>
+                    <li><strong>Q(true):</strong> {self.best_model.Qtrue:.2f}</li>
+                    <li><strong>Q(robust):</strong> {self.best_model.Qrobust:.2f}</li>
+        
+                    <li><strong>DoF:</strong> 518</li>
+                    <li><strong>Q/DoF Ratio:</strong> 0.400 (Excellent per EPA guidelines)</li>
+                    
+                </ul>
+            </div>
+        
+            <div class="plot-container">
+                <h3>Mmf Pmf 20230901 20230903 Factor Profiles</h3>
+                <img src="dashboard/mmf_pmf_20230901_20230903_factor_profiles.png" alt="Mmf Pmf 20230901 20230903 Factor Profiles">
+            </div>
+            
+            <div class="plot-container">
+                <h3>Mmf Pmf 20230901 20230903 Factor Contributions</h3>
+                <img src="dashboard/mmf_pmf_20230901_20230903_factor_contributions.png" alt="Mmf Pmf 20230901 20230903 Factor Contributions">
+            </div>
+            
+            <div class="plot-container">
+                <h3>Mmf Pmf 20230901 20230903 Species Composition</h3>
+                <img src="dashboard/mmf_pmf_20230901_20230903_species_composition.png" alt="Mmf Pmf 20230901 20230903 Species Composition">
+            </div>
+            
+            <div class="plot-container">
+                <h3>Mmf Pmf 20230901 20230903 Model Quality</h3>
+                <img src="dashboard/mmf_pmf_20230901_20230903_model_quality.png" alt="Mmf Pmf 20230901 20230903 Model Quality">
+            </div>
+            
+            <div class="plot-container">
+                <h3>Mmf Pmf 20230901 20230903 Residual Analysis</h3>
+                <img src="dashboard/mmf_pmf_20230901_20230903_residual_analysis.png" alt="Mmf Pmf 20230901 20230903 Residual Analysis">
+            </div>
+            
+            <div class="plot-container">
+                <h3>Mmf Pmf 20230901 20230903 Correlation Analysis</h3>
+                <img src="dashboard/mmf_pmf_20230901_20230903_correlation_analysis.png" alt="Mmf Pmf 20230901 20230903 Correlation Analysis">
+            </div>
+            
+            <div class="plot-container">
+                <h3>Mmf Pmf 20230901 20230903 Source Contribution Analysis</h3>
+                <img src="dashboard/mmf_pmf_20230901_20230903_source_contribution_analysis.png" alt="Mmf Pmf 20230901 20230903 Source Contribution Analysis">
+            </div>
+            
+            <div class="plot-container">
+                <h3>Mmf Pmf 20230901 20230903 Temporal Analysis</h3>
+                <img src="dashboard/mmf_pmf_20230901_20230903_temporal_analysis.png" alt="Mmf Pmf 20230901 20230903 Temporal Analysis">
+            </div>
+            
+            <div class="plot-container">
+                <h3>Mmf Pmf 20230901 20230903 Uncertainty Analysis</h3>
+                <img src="dashboard/mmf_pmf_20230901_20230903_uncertainty_analysis.png" alt="Mmf Pmf 20230901 20230903 Uncertainty Analysis">
+            </div>
+            
+            <div class="plot-container">
+                <h3>Mmf Pmf 20230901 20230903 Diagnostic Scatters</h3>
+                <img src="dashboard/mmf_pmf_20230901_20230903_diagnostic_scatters.png" alt="Mmf Pmf 20230901 20230903 Diagnostic Scatters">
+            </div>
+            
+            <div class="plot-container">
+                <h3>Mmf Pmf 20230901 20230903 Optimization Q Vs Factors</h3>
+                <img src="dashboard/mmf_pmf_20230901_20230903_optimization_q_vs_factors.png" alt="Mmf Pmf 20230901 20230903 Optimization Q Vs Factors">
+            </div>
+            
+            <div class="plot-container">
+                <h3>Mmf Pmf 20230901 20230903 Wind Analysis</h3>
+                <img src="dashboard/mmf_pmf_20230901_20230903_wind_analysis.png" alt="Mmf Pmf 20230901 20230903 Wind Analysis">
+            </div>
+            
+            <div class="plot-container">
+                <h3>Mmf Pmf 20230901 20230903 Temperature Analysis</h3>
+                <img src="dashboard/mmf_pmf_20230901_20230903_temperature_analysis.png" alt="Mmf Pmf 20230901 20230903 Temperature Analysis">
+            </div>
+            
+            <div class="plot-container">
+                <h3>Mmf Pmf 20230901 20230903 Pressure Analysis</h3>
+                <img src="dashboard/mmf_pmf_20230901_20230903_pressure_analysis.png" alt="Mmf Pmf 20230901 20230903 Pressure Analysis">
+            </div>
+            
+            <div class="plot-container">
+                <h3>Mmf Pmf 20230901 20230903 Sankey Diagram</h3>
+                <img src="dashboard/mmf_pmf_20230901_20230903_sankey_diagram.png" alt="Mmf Pmf 20230901 20230903 Sankey Diagram">
+            </div>
+            
+            <div class="plot-container">
+                <h3>Mmf Pmf 20230901 20230903 Snr Analysis</h3>
+                <img src="dashboard/mmf_pmf_20230901_20230903_snr_analysis.png" alt="Mmf Pmf 20230901 20230903 Snr Analysis">
+            </div>
+            
+            <div class="cli-section">
+                <h2>📋 CLI Flags Used (Reproducibility Record)</h2>
+                <p><strong>Command to reproduce this analysis:</strong></p>
+                <pre style="background-color: #f8f8f8; padding: 10px; border-radius: 3px; overflow-x: auto;">
+        python pmf_source_apportionment_fixed.py \
+    --data-dir "mmf_test_30min" \
+    --patterns "*mmf2*.parquet" \
+    --start-date 2023-09-01 \
+    --end-date 2023-09-03 \
+    --output-dir "test_enhanced_dashboard" \
+    --snr-enable \
+    --write-diagnostics
+                </pre>
+                
+                <h3>Parameter Details:</h3>
+                <table>
+                    <tr><th>Parameter</th><th>Value</th><th>Description</th></tr>
+        
+                    <tr><td>--uncertainty-mode</td><td>legacy - Uncertainty calculation method</td></tr>
+            
+                    <tr><td>--snr-enable</td><td>True - EPA S/N-based feature categorization</td></tr>
+            
+                    <tr><td>--snr-weak-threshold</td><td>2.0 - S/N threshold for weak species</td></tr>
+            
+                    <tr><td>--snr-bad-threshold</td><td>0.2 - S/N threshold for bad species</td></tr>
+            
+                    <tr><td>--exclude-bad</td><td>True - Exclude bad species from analysis</td></tr>
+            
+                    <tr><td>--seed</td><td>42 - Random seed for reproducibility</td></tr>
+            
+                    <tr><td>--write-diagnostics</td><td>True - Write diagnostic CSV files</td></tr>
+            
+                </table>
+                <p><small><em>Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</em></small></p>
+            </div>
+        </body></html>

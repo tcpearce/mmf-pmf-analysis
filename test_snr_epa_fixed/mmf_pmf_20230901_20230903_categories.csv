@@ -1,0 +1,11 @@
+species,category
+CH4,strong
+NOX,strong
+NO,strong
+NO2,strong
+H2S,bad
+PM1 FIDAS,strong
+PM2.5 FIDAS,strong
+PM4 FIDAS,strong
+PM10 FIDAS,strong
+TSP FIDAS,strong
