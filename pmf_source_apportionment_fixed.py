@@ -152,18 +152,22 @@ class ColorManager:
         return [self.species_colors[species] for species in self.species_names]
 
 class MMFPMFAnalyzer:
-    def __init__(self, station, start_date=None, end_date=None, output_dir="pmf_results", remove_voc=False):
+    def __init__(self, station=None, data_dir=None, patterns=None, start_date=None, end_date=None, output_dir="pmf_results", remove_voc=False):
         """
         Initialize PMF analyzer for MMF data.
         
         Args:
-            station (str): MMF station identifier (MMF1, MMF2, MMF6, MMF9)
+            station (str): MMF station identifier (MMF1, MMF2, MMF6, MMF9) - legacy mode
+            data_dir (str): Directory containing parquet files - flexible mode
+            patterns (str): Comma-separated parquet file patterns - flexible mode
             start_date (str): Start date in YYYY-MM-DD format
             end_date (str): End date in YYYY-MM-DD format
             output_dir (str): Directory for output files
             remove_voc (bool): If True, exclude VOC species from PMF analysis
         """
         self.station = station
+        self.data_dir = data_dir
+        self.patterns = patterns
         self.start_date = start_date
         self.end_date = end_date
         self.output_dir = Path(output_dir)
@@ -204,15 +208,24 @@ class MMFPMFAnalyzer:
         
         # Multiprocessing control
         self.max_workers = 2  # Default number of workers
+
+        # Runtime controls (CLI-configurable)
+        self.zero_as_bdl = True          # Treat exact zeros as BDL by default
+        self.save_masks = True           # Save BDL/missing masks by default
+        self.drop_row_threshold = 0.5    # Drop rows with >50% missing prior to replacement
     
     def _create_filename_prefix(self):
-        """Create standardized filename prefix with dates and MMF identifier."""
+        """Create standardized filename prefix with dates and identifier."""
         # Format dates for filename (replace invalid characters)
         start_str = self.start_date.replace('-', '') if self.start_date else 'all'
         end_str = self.end_date.replace('-', '') if self.end_date else 'all'
         
-        # Create prefix: station_mmf_startdate_enddate
-        prefix = f"{self.station}_mmf_{start_str}_{end_str}"
+        if self.station:
+            # Legacy mode: use station name
+            prefix = f"{self.station}_mmf_{start_str}_{end_str}"
+        else:
+            # Flexible mode: use generic prefix
+            prefix = f"mmf_pmf_{start_str}_{end_str}"
         return prefix
     
     def _get_station_display_name(self):
@@ -230,50 +243,115 @@ class MMFPMFAnalyzer:
             return self.station
     
     def _display_station_info(self):
-        """Display prominent station information banner."""
-        station_mapping = get_station_mapping()
-        
-        # Get station name and MMF info
-        if self.station in station_mapping:
-            station_name = station_mapping[self.station]
-            if station_name:
-                display_name = f"{self.station} - {station_name}"
-            else:
-                display_name = self.station  # For Maries_Way
-        else:
-            display_name = self.station
-            
+        """Display prominent analysis information banner."""
         print("\n" + "=" * 60)
         print("🧪 MMF PMF SOURCE APPORTIONMENT ANALYSIS (FIXED)")
         print("=" * 60)
-        print(f"🏭 Station: {display_name}")
+        
+        if self.station:
+            # Legacy station-based mode
+            station_mapping = get_station_mapping()
+            if self.station in station_mapping:
+                station_name = station_mapping[self.station]
+                if station_name:
+                    display_name = f"{self.station} - {station_name}"
+                else:
+                    display_name = self.station  # For Maries_Way
+            else:
+                display_name = self.station
+            print(f"🏭 Station: {display_name}")
+        else:
+            # Flexible data directory mode
+            print(f"📁 Data Directory: {self.data_dir}")
+            print(f"🔍 Patterns: {self.patterns}")
+            
         if self.start_date or self.end_date:
             date_info = f"{self.start_date or 'All'} to {self.end_date or 'All'}"
             print(f"📅 Analysis Period: {date_info}")
         print(f"📂 Output Directory: {self.output_dir}")
         print("=" * 60)
     
+    def _find_parquet_files(self):
+        """Find parquet files matching the specified patterns in the data directory."""
+        from pathlib import Path
+        import fnmatch
+        
+        data_path = Path(self.data_dir)
+        if not data_path.exists():
+            raise FileNotFoundError(f"Data directory not found: {self.data_dir}")
+        
+        # Parse patterns (comma-separated)
+        patterns = [p.strip() for p in self.patterns.split(',')]
+        
+        # Find matching files
+        matching_files = []
+        for pattern in patterns:
+            # Use glob-style matching
+            matches = list(data_path.glob(pattern))
+            matching_files.extend(matches)
+        
+        # Remove duplicates and sort
+        unique_files = sorted(list(set(matching_files)))
+        
+        print(f"🔍 Found {len(unique_files)} matching parquet file(s):")
+        for f in unique_files:
+            print(f"   - {f.name}")
+        
+        return unique_files
+    
     def load_mmf_data(self):
         """Load and prepare MMF data for PMF analysis."""
-        # Display station information banner
+        # Display information banner
         self._display_station_info()
         
-        print(f"🔍 Loading MMF data for {self.station}...")
-        
-        # Use corrected parquet file path
-        try:
-            parquet_file = get_mmf_parquet_file(self.station)
-        except Exception as e:
-            raise RuntimeError(f"Error determining file path for {self.station}: {e}")
-        
-        if not parquet_file.exists():
-            raise FileNotFoundError(f"Corrected parquet file not found: {parquet_file}")
-        
-        analyzer = ParquetAnalyzer(parquet_file)
-        if not analyzer.load_data():
-            raise RuntimeError("Failed to load parquet data")
+        if self.station:
+            # Legacy mode: station-based loading
+            print(f"🔍 Loading MMF data for {self.station}...")
+            try:
+                parquet_file = get_mmf_parquet_file(self.station)
+            except Exception as e:
+                raise RuntimeError(f"Error determining file path for {self.station}: {e}")
+            
+            if not parquet_file.exists():
+                raise FileNotFoundError(f"Corrected parquet file not found: {parquet_file}")
+            
+            analyzer = ParquetAnalyzer(parquet_file)
+            if not analyzer.load_data():
+                raise RuntimeError("Failed to load parquet data")
+        else:
+            # Flexible mode: data directory and patterns
+            print(f"🔍 Loading parquet data from {self.data_dir}...")
+            parquet_files = self._find_parquet_files()
+            if not parquet_files:
+                raise FileNotFoundError(f"No parquet files found matching patterns: {self.patterns}")
+            
+            # For now, use the first file (could be extended to merge multiple files)
+            parquet_file = parquet_files[0]
+            print(f"📄 Using file: {parquet_file.name}")
+            
+            analyzer = ParquetAnalyzer(parquet_file)
+            if not analyzer.load_data():
+                raise RuntimeError("Failed to load parquet data")
         
         self.df = analyzer.df.copy()
+
+        # Read aggregation metadata from parquet if available
+        try:
+            import pyarrow.parquet as pq
+            pf = pq.ParquetFile(parquet_file)
+            meta = pf.metadata.metadata or {}
+            meta = { (k.decode() if isinstance(k, bytes) else str(k)):
+                     (v.decode() if isinstance(v, bytes) else str(v))
+                     for k,v in meta.items() }
+            self.aggregation_timebase = meta.get('aggregation_timebase')
+            self.aggregation_method = meta.get('aggregation_method')
+            self.min_valid_subsamples = int(meta.get('min_valid_subsamples')) if meta.get('min_valid_subsamples') else None
+            if self.aggregation_timebase or self.aggregation_method:
+                print(f"🧭 Aggregation metadata: timebase={self.aggregation_timebase}, method={self.aggregation_method}, min_valid={self.min_valid_subsamples}")
+        except Exception as e:
+            self.aggregation_timebase = None
+            self.aggregation_method = None
+            self.min_valid_subsamples = None
         
         # Get units from metadata (stored or inferred)
         stored_units = analyzer.extract_units_from_metadata()
@@ -345,10 +423,8 @@ class MMFPMFAnalyzer:
         else:
             all_species = gas_species + particle_species + voc_species
         
-        for col in self.df.columns:
-            if any(species in col for species in all_species):
-                if col not in ['datetime', 'gas_data_available', 'particle_data_available']:
-                    pollutant_columns.append(col)
+        # Select columns that exactly match target species (avoid auxiliary columns like 'n_*')
+        pollutant_columns = [col for col in self.df.columns if col in all_species]
         
         print(f"📋 Selected pollutants for PMF: {pollutant_columns}")
         
@@ -378,36 +454,115 @@ class MMFPMFAnalyzer:
         
         # Create concentration matrix
         self.concentration_data = self.df[pollutant_columns].copy()
+
+        # Attempt to collect aggregation counts if present (columns prefixed with 'n_')
+        count_cols = {}
+        for col in pollutant_columns:
+            n_col = f"n_{col}"
+            if n_col in self.df.columns:
+                count_cols[n_col] = self.df[n_col]
+        if count_cols:
+            self.counts_data = pd.DataFrame(count_cols)
+        else:
+            self.counts_data = None
+
+        # Standardize all concentrations to μg/m³ prior to computing uncertainties
+        self._standardize_units_to_ugm3(pollutant_columns)
         
         # Remove rows with too many missing values (EPA recommendation: >50% missing)
-        missing_threshold = 0.5
+        missing_threshold = getattr(self, 'drop_row_threshold', 0.5)
         valid_rows = self.concentration_data.isnull().sum(axis=1) / len(pollutant_columns) < missing_threshold
         self.concentration_data = self.concentration_data[valid_rows]
+        if self.counts_data is not None:
+            self.counts_data = self.counts_data.loc[self.concentration_data.index]
         
-        print(f"📊 After removing rows with >{missing_threshold*100}% missing: {len(self.concentration_data):,} records")
+        print(f"📊 After removing rows with >{missing_threshold*100:.1f}% missing: {len(self.concentration_data):,} records")
         
         # Generate uncertainty matrix following EPA guidelines
         self._generate_uncertainty_matrix(pollutant_columns)
         
-        # Handle missing values (EPA Method 1: Replace with median, set high uncertainty)
-        self._handle_missing_values()
-        
         # Save processed data
         self._save_processed_data()
     
+    def _normalize_unit_string(self, unit_str):
+        """Normalize unit strings to a canonical form for comparison."""
+        if unit_str is None:
+            return None
+        s = str(unit_str).strip().lower()
+        s = s.replace('µ', 'μ')
+        s = s.replace(' ', '')
+        s = s.replace('(', '').replace(')', '')
+        # Normalize common variants
+        s = s.replace('ug/m³', 'ug/m3')
+        s = s.replace('μg/m³', 'ug/m3')
+        s = s.replace('μg/m3', 'ug/m3')
+        s = s.replace('µg/m³', 'ug/m3')
+        s = s.replace('µg/m3', 'ug/m3')
+        s = s.replace('mg/m³', 'mg/m3')
+        s = s.replace('ng/m³', 'ng/m3')
+        s = s.replace('ugm3', 'ug/m3')
+        s = s.replace('mgm3', 'mg/m3')
+        s = s.replace('ngm3', 'ng/m3')
+        return s
+
+    def _standardize_units_to_ugm3(self, pollutant_columns):
+        """
+        Ensure all concentration columns are in μg/m³ before uncertainty calc.
+        - If a column is reported in mg/m³, multiply by 1000
+        - If in ng/m³, divide by 1000
+        - Update self.units to 'μg/m³'
+        - Warn if units are non-mass-based (e.g., ppm/ppb) as no conversion is applied
+        """
+        conversions = []
+        for col in pollutant_columns:
+            orig_unit = self.units.get(col)
+            unit_norm = self._normalize_unit_string(orig_unit)
+            # Fallback to suspected units if not present
+            if unit_norm is None or unit_norm == 'unknown':
+                try:
+                    from analyze_parquet_data import ParquetAnalyzer
+                    # No direct file context here for analyzer, so use suspected units helper we imported earlier
+                    suspected = self._normalize_unit_string(self.units.get(col, None))
+                    unit_norm = suspected or unit_norm
+                except Exception:
+                    pass
+            factor = None
+            if unit_norm in ('ug/m3', None):
+                continue  # already μg/m³ or unknown (leave as-is)
+            elif unit_norm == 'mg/m3':
+                factor = 1000.0
+            elif unit_norm == 'ng/m3':
+                factor = 0.001
+            elif unit_norm in ('ppm', 'ppb'):
+                print(f"⚠️ Units for {col} are in {orig_unit}; no automatic ppm/ppb → μg/m³ conversion applied.")
+                continue
+            else:
+                # Unrecognized units
+                print(f"⚠️ Unrecognized unit '{orig_unit}' for {col}; leaving values unchanged.")
+                continue
+            if factor is not None:
+                self.concentration_data[col] = self.concentration_data[col] * factor
+                self.units[col] = 'μg/m³'
+                conversions.append((col, orig_unit, factor))
+        if conversions:
+            print("🔁 Standardized units to μg/m³ for the following columns:")
+            for col, ou, f in conversions:
+                print(f"  - {col}: {ou} → μg/m³ (×{f})")
+
     def _generate_uncertainty_matrix(self, pollutant_columns):
         """
         Generate uncertainty matrix following EPA PMF 5.0 guidelines.
+        All MDL values below are specified in μg/m³ to match standardized V.
         
         EPA Formula: σ = sqrt((error_fraction * concentration)² + (MDL)²)
         """
         print("🔬 Generating uncertainty matrix...")
         
-        # EPA-recommended MDL values and error fractions by pollutant type
+        # EPA-recommended MDL values and error fractions by pollutant type (all in μg/m³)
         # Based on typical instrument specifications and EPA guidance
         mdl_values = {
             'H2S': 0.5,      # μg/m³
-            'CH4': 0.05,     # mg/m³  
+            'CH4': 50.0,     # μg/m³ (converted from 0.05 mg/m³ → 50 μg/m³)
             'SO2': 0.5,      # μg/m³
             'NOX': 1.0,      # μg/m³
             'NO': 0.5,       # μg/m³
@@ -422,8 +577,8 @@ class MMFPMFAnalyzer:
             'PM10': 2.0,         # μg/m³
             'TSP FIDAS': 2.5,    # μg/m³
             'TSP': 2.5,          # μg/m³
-            # VOC species (BTEX compounds) - typical GC-MS detection limits
-            'Benzene': 0.01,     # μg/m³ (very low detection limit for carcinogen)
+            # VOC species (BTEX compounds) - typical GC-MS detection limits (μg/m³)
+            'Benzene': 0.01,     # μg/m³
             'Toluene': 0.02,     # μg/m³
             'Ethylbenzene': 0.02,    # μg/m³
             'Xylene': 0.02,      # μg/m³ (covers m&p-Xylene)
@@ -462,22 +617,68 @@ class MMFPMFAnalyzer:
             columns=self.concentration_data.columns
         )
         
+        # Initialize masks for traceability
+        self._bdl_mask = pd.DataFrame(False, index=self.concentration_data.index, columns=self.concentration_data.columns)
+        self._missing_mask = pd.DataFrame(False, index=self.concentration_data.index, columns=self.concentration_data.columns)
+
         for species in pollutant_columns:
             # Find matching MDL and error fraction (partial name matching)
-            mdl = 1.0  # Default MDL
+            mdl = 1.0  # Default MDL (μg/m³)
             err_frac = 0.15  # Default error fraction
-            
+
             for key in mdl_values.keys():
                 if key in species:
                     mdl = mdl_values[key]
                     err_frac = error_fractions[key]
                     break
-            
-            # Apply EPA uncertainty formula
-            conc = self.concentration_data[species]
-            self.uncertainty_data[species] = np.sqrt((err_frac * conc)**2 + mdl**2)
-            
-            print(f"  {species}: MDL={mdl}, Error={err_frac*100}% ({self.units.get(species, 'unknown')})")
+
+            # Create masks
+            col = self.concentration_data[species]
+            missing_mask = col.isna()
+            zero_mask = (~missing_mask) & (col == 0)
+            # Treat numeric values < MDL as BDL
+            bdl_mask = (~missing_mask) & (col < mdl)
+            # Optionally treat zeros as missing instead of BDL
+            if hasattr(self, 'zero_as_bdl') and not self.zero_as_bdl:
+                bdl_mask = bdl_mask & (~zero_mask)
+                missing_mask = missing_mask | zero_mask
+            measured_mask = (~missing_mask) & (col >= mdl)
+
+            # Allocate arrays
+            u_col = np.zeros_like(col, dtype=float)
+            v_new = col.copy()
+
+            # Apply EPA PMF rules
+            # Measured cells
+            if measured_mask.any():
+                v_meas = v_new[measured_mask].astype(float)
+                u_col[measured_mask] = np.sqrt((err_frac * v_meas) ** 2 + mdl ** 2)
+
+            # BDL cells: V = MDL/2, U = (5/6)·MDL
+            if bdl_mask.any():
+                v_new.loc[bdl_mask] = mdl * 0.5
+                u_col[bdl_mask] = mdl * (5.0 / 6.0)
+
+            # Missing cells: V = MDL, U = 4·MDL
+            if missing_mask.any():
+                v_new.loc[missing_mask] = mdl
+                u_col[missing_mask] = mdl * 4.0
+
+            # Save back
+            self.concentration_data[species] = v_new
+            self.uncertainty_data[species] = u_col
+
+            # Save masks for traceability
+            self._bdl_mask[species] = bdl_mask
+            self._missing_mask[species] = missing_mask
+
+            # Summary
+            total = len(col)
+            n_meas = int(measured_mask.sum())
+            n_bdl = int(bdl_mask.sum())
+            n_missing = int(missing_mask.sum())
+            print(f"  {species}: MDL={mdl}, Err={err_frac*100:.1f}% | measured={n_meas} ({n_meas/total*100:.1f}%), "
+                  f"BDL={n_bdl} ({n_bdl/total*100:.1f}%), missing={n_missing} ({n_missing/total*100:.1f}%) | Units={self.units.get(species, 'unknown')}")
     
     def _handle_missing_values(self):
         """Handle missing values following EPA Method 1."""
@@ -552,6 +753,33 @@ class MMFPMFAnalyzer:
         
         conc_data.to_csv(conc_file)
         unc_data.to_csv(unc_file)
+
+        # Optionally save BDL/missing masks for traceability
+        try:
+            if getattr(self, 'save_masks', True) and hasattr(self, '_bdl_mask') and hasattr(self, '_missing_mask'):
+                bdl_mask = self._bdl_mask.loc[self.concentration_data.index]
+                missing_mask = self._missing_mask.loc[self.concentration_data.index]
+                bdl_mask.index = datetime_values
+                missing_mask.index = datetime_values
+                bdl_file = self.output_dir / f"{self.filename_prefix}_bdl_mask.csv"
+                missing_file = self.output_dir / f"{self.filename_prefix}_missing_mask.csv"
+                bdl_mask.to_csv(bdl_file)
+                missing_mask.to_csv(missing_file)
+                print(f"💾 Saved BDL mask: {bdl_file}")
+                print(f"💾 Saved Missing mask: {missing_file}")
+        except Exception as e:
+            print(f"⚠️ Could not save masks: {e}")
+
+        # Optionally save counts if available
+        try:
+            if self.counts_data is not None and len(self.counts_data.columns) > 0:
+                counts_out = self.counts_data.copy()
+                counts_out.index = datetime_values
+                counts_file = self.output_dir / f"{self.filename_prefix}_counts.csv"
+                counts_out.to_csv(counts_file)
+                print(f"💾 Saved aggregation counts: {counts_file}")
+        except Exception as e:
+            print(f"⚠️ Could not save counts: {e}")
         
         print(f"💾 Saved concentration data: {conc_file}")
         print(f"💾 Saved uncertainty data: {unc_file}")
@@ -576,6 +804,27 @@ class MMFPMFAnalyzer:
         V = conc_df.values  # Concentration matrix
         U = unc_df.values   # Uncertainty matrix
         species_names = conc_df.columns.tolist()
+
+        # Apply uncertainty scaling for aggregated windows if counts and metadata available
+        try:
+            counts_file = self.output_dir / f"{self.filename_prefix}_counts.csv"
+            if counts_file.exists() and (self.aggregation_method in ("mean", "median")):
+                counts_df = pd.read_csv(counts_file, index_col=0)
+                # Build scaling factors per species
+                for j, sp in enumerate(species_names):
+                    n_col = f"n_{sp}"
+                    if n_col in counts_df.columns:
+                        n = counts_df[n_col].values.astype(float)
+                        n = np.where(np.isfinite(n) & (n > 0), n, 1.0)
+                        if self.aggregation_method == 'mean':
+                            scale = 1.0 / np.sqrt(n)
+                        else:
+                            # Median approx: 1.253/sqrt(n)
+                            scale = 1.253 / np.sqrt(n)
+                        U[:, j] = U[:, j] * scale
+                print(f"🧮 Applied uncertainty scaling based on aggregation counts (method={self.aggregation_method})")
+        except Exception as e:
+            print(f"⚠️ Could not apply aggregation-based uncertainty scaling: {e}")
         
         print(f"📊 Data matrices: V={V.shape}, U={U.shape}")
         print(f"📋 Species: {', '.join(species_names)}")
@@ -593,18 +842,23 @@ class MMFPMFAnalyzer:
             print(f"⚠️ Warning: Very few data points ({V.shape[0]}) - PMF results may be unreliable")
             print("   Consider expanding date range or reducing missing data threshold")
         
-        # Check for non-positive values and fix them
-        V = np.maximum(V, 0.1)  # Ensure positive concentrations
-        U = np.maximum(U, 0.1)  # Ensure positive uncertainties
+        # Ensure physical constraints without distorting scale
+        # Concentrations must be non-negative; clip small negatives to 0.0 (do NOT floor to 0.1)
+        if V.size > 0:
+            V = np.where(np.isnan(V), 0.0, V)
+            V = np.where(np.isposinf(V), np.nanmax(V[np.isfinite(V)]) if np.any(np.isfinite(V)) else 1.0, V)
+            V = np.where(np.isneginf(V), 0.0, V)
+            V = np.where(V < 0, 0.0, V)
         
-        # Final check for NaN/infinite values before ESAT
-        if V.size > 0 and (np.any(np.isnan(V)) or np.any(np.isinf(V))):
-            print("⚠️ Warning: NaN/inf values detected in concentration matrix, fixing...")
-            V = np.nan_to_num(V, nan=0.1, posinf=100.0, neginf=0.1)
-        
-        if U.size > 0 and (np.any(np.isnan(U)) or np.any(np.isinf(U))):
-            print("⚠️ Warning: NaN/inf values detected in uncertainty matrix, fixing...")
-            U = np.nan_to_num(U, nan=1.0, posinf=10.0, neginf=1.0)
+        # Uncertainty must be strictly positive for weighting; replace invalids with a small positive value
+        if U.size > 0:
+            finite_U = U[np.isfinite(U)]
+            median_U = float(np.nanmedian(finite_U)) if finite_U.size > 0 else 1.0
+            max_U = float(np.nanmax(finite_U)) if finite_U.size > 0 else 10.0
+            min_positive = max(median_U * 1e-6, 1e-9)
+            U = np.where(np.isnan(U), median_U, U)
+            U = np.where(np.isposinf(U), max_U, U)
+            U = np.where(np.isneginf(U) | (U <= 0), min_positive, U)
         
         print(f"📊 Final data validation:")
         print(f"  V range: [{np.min(V):.3f}, {np.max(V):.3f}]")
@@ -4631,8 +4885,13 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
 
 def main():
     parser = argparse.ArgumentParser(description='PMF Source Apportionment Analysis for MMF Data (ESAT Fixed)')
-    parser.add_argument('station', choices=['MMF1', 'MMF2', 'MMF6', 'MMF9', 'Maries_Way'],
-                       help='MMF station to analyze (using corrected station mappings)')
+    # Optional station argument (for backward compatibility)
+    parser.add_argument('station', nargs='?', choices=['MMF1', 'MMF2', 'MMF6', 'MMF9', 'Maries_Way'],
+                       help='MMF station to analyze (using corrected station mappings). Alternative: use --data-dir and --patterns')
+    parser.add_argument('--data-dir', type=str,
+                       help='Directory containing parquet files (alternative to station-based loading)')
+    parser.add_argument('--patterns', type=str, 
+                       help='Comma-separated parquet file patterns to match (e.g., "MMF2_combined_data.parquet,MMF9_combined_data.parquet")')
     parser.add_argument('--start-date', type=str,
                        help='Start date (YYYY-MM-DD format)', default=None)
     parser.add_argument('--end-date', type=str,
@@ -4642,7 +4901,7 @@ def main():
     parser.add_argument('--max-factors', type=int, default=10,
                        help='Maximum factors to test during optimization (default: 10). Ignored if --factors is specified.')
     parser.add_argument('--models', type=int, default=20,
-                       help='Number of models to run (default: 20)')
+                       help='Number of models to run (must be >= 1, default: 20)')
     parser.add_argument('--output-dir', type=str, default='pmf_results_esat',
                        help='Output directory (default: pmf_results_esat)')
     parser.add_argument('--run-pca', action='store_true',
@@ -4653,12 +4912,40 @@ def main():
                        help='Maximum number of parallel processes for PMF analysis (default: 2)')
     parser.add_argument('--remove-voc', action='store_true',
                        help='Remove VOC species (Benzene, Toluene, Ethylbenzene, Xylene) from PMF analysis')
+
+    # EPA BDL/missing runtime controls
+    parser.add_argument('--drop-row-threshold', type=float, default=0.5,
+                       help='Row drop threshold BEFORE replacement: drop rows with a fraction of missing values above this threshold (0–1, default: 0.5 → >50% missing)')
+    zero_group = parser.add_mutually_exclusive_group()
+    zero_group.add_argument('--zero-as-bdl', dest='zero_as_bdl', action='store_true',
+                           help='Treat exact zeros as below detection limit (BDL) (default)')
+    zero_group.add_argument('--no-zero-as-bdl', dest='zero_as_bdl', action='store_false',
+                           help='Treat exact zeros as missing instead of BDL')
+    parser.set_defaults(zero_as_bdl=True)
+
+    mask_group = parser.add_mutually_exclusive_group()
+    mask_group.add_argument('--save-masks', dest='save_masks', action='store_true',
+                           help='Save BDL and missing mask CSVs (default)')
+    mask_group.add_argument('--no-save-masks', dest='save_masks', action='store_false',
+                           help='Do not save BDL/missing mask CSVs')
+    parser.set_defaults(save_masks=True)
     
     args = parser.parse_args()
     
+    # Validate arguments
+    if not args.station and not (args.data_dir and args.patterns):
+        parser.error("Either specify a station or provide both --data-dir and --patterns")
+    
+    if args.station and (args.data_dir or args.patterns):
+        parser.error("Cannot specify both station and --data-dir/--patterns. Choose one approach.")
+    
     print("🚀 MMF PMF Source Apportionment Analysis (ESAT Fixed)")
     print("=" * 60)
-    print(f"Station: {args.station}")
+    if args.station:
+        print(f"Station: {args.station}")
+    else:
+        print(f"Data directory: {args.data_dir}")
+        print(f"Patterns: {args.patterns}")
     print(f"Date range: {args.start_date or 'All'} to {args.end_date or 'All'}")
     print(f"Output: {args.output_dir}")
     print()
@@ -4667,6 +4954,8 @@ def main():
         # Initialize analyzer
         pmf = MMFPMFAnalyzer(
             station=args.station,
+            data_dir=args.data_dir,
+            patterns=args.patterns,
             start_date=args.start_date,
             end_date=args.end_date,
             output_dir=args.output_dir,
@@ -4683,9 +4972,18 @@ def main():
             pmf.factors = 4  # Default fallback
             pmf.user_specified_factors = False
         
-        pmf.models = args.models
+        # Validate models count (ESAT requires at least 1)
+        pmf.models = max(1, int(args.models))
+        if args.models < 1:
+            print("⚠️  --models must be >= 1; defaulting to 1")
         pmf.max_factors = args.max_factors  # Pass max_factors for optimization
         pmf.max_workers = args.max_workers  # Control multiprocessing
+
+        # Apply EPA BDL/missing runtime controls
+        pmf.drop_row_threshold = max(0.0, min(1.0, args.drop_row_threshold))
+        pmf.zero_as_bdl = args.zero_as_bdl
+        pmf.save_masks = args.save_masks
+        print(f"⚙️  BDL/Missing controls: drop-row-threshold={pmf.drop_row_threshold}, zero-as-bdl={pmf.zero_as_bdl}, save-masks={pmf.save_masks}")
         
         # Run analysis workflow
         pmf.load_mmf_data()
@@ -4730,7 +5028,8 @@ def main():
                 print(f"📄 PDF dashboard: {pdf_path}")
             
             print(f"📊 Results saved in: {pmf.output_dir}")
-            print(f"📄 View dashboard: {pmf.output_dir}/{args.station}_pmf_dashboard.html")
+            dashboard_name = f"{args.station}_pmf_dashboard.html" if args.station else "mmf_pmf_dashboard.html"
+            print(f"📄 View dashboard: {pmf.output_dir}/{dashboard_name}")
         else:
             print("\n❌ PMF analysis failed!")
             return 1

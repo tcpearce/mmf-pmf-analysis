@@ -47,6 +47,19 @@ The current focus is on completing the temporal alignment pipeline test to ensur
 3. Metadata is propagated to PMF analysis
 4. Uncertainty scaling is applied based on aggregation counts
 
+**14:00 - Completed PMF script modifications for flexible data directory input**
+- **Issue**: pmf_source_apportionment_fixed.py only accepted hardcoded station choices (MMF1, MMF2, MMF6, MMF9, Maries_Way)
+- **Solution**: Added flexible data directory and pattern matching capabilities
+- **Changes Made**: 
+  - Made station argument optional, added --data-dir and --patterns options
+  - Added argument validation to ensure either station OR data-dir/patterns are provided
+  - Updated MMFPMFAnalyzer constructor to handle both modes
+  - Added _find_parquet_files() method for pattern-based file discovery
+  - Updated load_mmf_data() for both legacy station-based and flexible data directory loading
+  - Updated _display_station_info() and _create_filename_prefix() for flexible mode
+  - Fixed HTML dashboard filename generation for both modes
+- **Next**: Test with MMF2 30min aggregated parquet file and verify metadata reading
+
 **13:30 - Discovered and fixed units row parsing bug**
 - **Issue Found**: MMF2 processing completed but output parquet only contains datetime and availability flags, no concentration data or count columns
 - **Root Cause**: Excel files have units in row immediately after headers (row 1), causing all columns to be treated as strings instead of numeric
