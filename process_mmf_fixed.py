@@ -19,9 +19,30 @@ logging.basicConfig(
 )
 
 class MMFProcessor:
-    def __init__(self, output_dir="mmf_parquet"):
+    def __init__(self, output_dir="mmf_parquet", target_timebase: str = "15min", aggregate_method: str = "mean", min_valid_subsamples: int = 2, include_voc: bool = True,
+                 filter_start: str = None, filter_end: str = None, gas_sheet: str = None, particle_sheet: str = None):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(exist_ok=True)
+        # Aggregation configuration
+        # Supported target_timebase values: '15min', '30min'
+        if target_timebase not in ("15min", "30min"):
+            logging.warning(f"Unsupported target_timebase '{target_timebase}', defaulting to '15min'")
+            target_timebase = "15min"
+        self.target_timebase = target_timebase
+        if aggregate_method not in ("mean", "median"):
+            logging.warning(f"Unsupported aggregate_method '{aggregate_method}', defaulting to 'mean'")
+            aggregate_method = "mean"
+        self.aggregate_method = aggregate_method
+        # Minimum number of valid sub-samples required to compute an aggregate window
+        self.min_valid_subsamples = max(1, int(min_valid_subsamples))
+        # Whether VOC (30-min native) will be included downstream
+        self.include_voc = include_voc
+        # Optional global date filter applied after alignment
+        self.filter_start = pd.to_datetime(filter_start) if filter_start else None
+        self.filter_end = pd.to_datetime(filter_end) if filter_end else None
+        # Optional explicit sheet names
+        self.gas_sheet = gas_sheet
+        self.particle_sheet = particle_sheet
 
     def find_header_row(self, filepath, sheet_name):
         """Find the row containing the data headers."""
@@ -168,68 +189,108 @@ class MMFProcessor:
             logging.error(f"Error reading sheet {sheet_name}: {str(e)}")
             return None, {}
 
-    def align_and_combine_data(self, gas_df, particle_df):
-        """Align gas and particle data on 5-minute intervals."""
+    def _aggregate_dataframe(self, df: pd.DataFrame, native_freq: str, target_freq: str, method: str, min_valid: int):
+        """Aggregate a datetime-indexed dataframe from native_freq to target_freq with counts and min coverage.
+        Returns (aggregated_values_df, counts_df)."""
         try:
-            # Determine overall time range
-            start_time = min(gas_df['datetime'].min(), particle_df['datetime'].min())
-            end_time = max(gas_df['datetime'].max(), particle_df['datetime'].max())
-            
-            # Create 5-minute timebase
-            timebase = pd.date_range(
-                start=start_time.floor('5min'),
-                end=end_time.ceil('5min'),
-                freq='5min'
-            )
-            
-            logging.info(f"Created timebase: {len(timebase)} timestamps from {timebase[0]} to {timebase[-1]}")
-            
-            # Create base DataFrame
-            combined_df = pd.DataFrame({'datetime': timebase})
-            
-            # Prepare gas data (remove DATE/TIME, keep datetime)
+            dfi = df.set_index('datetime')
+            # Identify numeric columns (exclude any non-numeric)
+            numeric_cols = [c for c in dfi.columns if pd.api.types.is_numeric_dtype(dfi[c])]
+            if method == 'median':
+                agg_vals = dfi[numeric_cols].resample(target_freq).median()
+            else:
+                agg_vals = dfi[numeric_cols].resample(target_freq).mean()
+            counts = dfi[numeric_cols].resample(target_freq).count()
+            # Enforce minimum coverage per window per column
+            mask_insufficient = counts < int(min_valid)
+            agg_vals = agg_vals.mask(mask_insufficient, other=pd.NA)
+            agg_vals = agg_vals.reset_index()
+            counts = counts.reset_index()
+            return agg_vals, counts
+        except Exception as e:
+            logging.error(f"Error aggregating dataframe: {e}")
+            return None, None
+
+    def align_and_combine_data(self, gas_df, particle_df):
+        """Align gas (5-min) and particle (15-min) data to target_timebase without forward-fill."""
+        try:
+            tgt = self.target_timebase  # '15min' or '30min'
+            method = self.aggregate_method
+            min_valid = self.min_valid_subsamples
+            logging.info(f"Aggregating to target_timebase={tgt}, method={method}, min_valid_subsamples={min_valid}")
+            if tgt not in ("15min", "30min"):
+                raise ValueError(f"Unsupported target_timebase: {tgt}")
+
+            # Clean input frames
             gas_clean = gas_df.drop(['DATE', 'TIME'], axis=1, errors='ignore')
-            
-            # Prepare particle data (remove DATE/TIME, keep datetime)
             particle_clean = particle_df.drop(['DATE', 'TIME'], axis=1, errors='ignore')
-            
-            # Merge gas data
-            logging.info("Merging gas data...")
-            combined_df = combined_df.merge(gas_clean, on='datetime', how='left')
-            
-            # Merge particle data
-            logging.info("Merging particle data...")
-            combined_df = combined_df.merge(particle_clean, on='datetime', how='left', suffixes=('', '_particle'))
-            
-            # Forward fill particle data to match 5-minute intervals (within reasonable limits)
-            particle_cols = [col for col in combined_df.columns 
-                           if any(pm in col for pm in ['PM', 'TSP', 'TEMP', 'AMB_PRES'])]
-            
-            logging.info(f"Forward filling particle columns: {particle_cols}")
-            for col in particle_cols:
-                if col in combined_df.columns:
-                    # Forward fill with limit to avoid filling very long gaps
-                    combined_df[col] = combined_df[col].fillna(method='ffill', limit=3)
-            
-            # Add data availability flags
-            h2s_col = 'H2S' if 'H2S' in combined_df.columns else None
-            pm25_col = 'PM2.5' if 'PM2.5' in combined_df.columns else None
-            
-            combined_df['gas_data_available'] = combined_df[h2s_col].notna() if h2s_col else False
-            combined_df['particle_data_available'] = combined_df[pm25_col].notna() if pm25_col else False
-            
-            logging.info(f"Combined dataset: {len(combined_df)} records")
-            logging.info(f"Gas data points: {combined_df['gas_data_available'].sum()}")
-            logging.info(f"Particle data points: {combined_df['particle_data_available'].sum()}")
-            
-            return combined_df
-            
+
+            # Aggregate gas (native 5min)
+            gas_vals, gas_counts = self._aggregate_dataframe(gas_clean, native_freq="5min", target_freq=tgt, method=method, min_valid=min_valid)
+            if gas_vals is None:
+                return None
+            # Prefix counts columns with n_
+            if gas_counts is not None:
+                gas_counts = gas_counts.rename(columns={c: f"n_{c}" for c in gas_counts.columns if c != 'datetime'})
+
+            # Aggregate particle (native 15min)
+            if tgt == "15min":
+                # No aggregation needed, but compute counts as 1 for non-NaN values
+                dfi = particle_clean.set_index('datetime')
+                numeric_cols = [c for c in dfi.columns if pd.api.types.is_numeric_dtype(dfi[c])]
+                part_vals = dfi[numeric_cols].resample("15min").mean().reset_index()
+                part_counts = dfi[numeric_cols].resample("15min").count().reset_index()
+                # Enforce minimum coverage (min_valid of 1 means at least 1 valid 15-min sample)
+                mask_insufficient = part_counts[numeric_cols] < int(max(1, min_valid))
+                for col in numeric_cols:
+                    part_vals.loc[mask_insufficient[col], col] = pd.NA
+                part_counts = part_counts.rename(columns={c: f"n_{c}" for c in numeric_cols})
+            else:
+                # 30-min target: aggregate particle from 15min → 30min
+                part_vals, part_counts = self._aggregate_dataframe(particle_clean, native_freq="15min", target_freq="30min", method=method, min_valid=min_valid)
+                if part_counts is not None:
+                    part_counts = part_counts.rename(columns={c: f"n_{c}" for c in part_counts.columns if c != 'datetime'})
+
+            # Merge on datetime
+            combined = gas_vals.merge(part_vals, on='datetime', how='outer', suffixes=('', ''))
+
+            # Apply optional global date filter
+            if self.filter_start is not None:
+                combined = combined[combined['datetime'] >= self.filter_start]
+            if self.filter_end is not None:
+                combined = combined[combined['datetime'] <= self.filter_end]
+            if gas_counts is not None:
+                combined = combined.merge(gas_counts, on='datetime', how='left')
+            if part_counts is not None:
+                combined = combined.merge(part_counts, on='datetime', how='left')
+
+            # Sort and reindex
+            combined = combined.sort_values('datetime').reset_index(drop=True)
+
+            # Add availability flags
+            h2s_col = 'H2S' if 'H2S' in combined.columns else None
+            pm25_col = 'PM2.5' if 'PM2.5' in combined.columns else None
+            combined['gas_data_available'] = combined[h2s_col].notna() if h2s_col else False
+            combined['particle_data_available'] = combined[pm25_col].notna() if pm25_col else False
+
+            logging.info(f"Combined dataset (aligned to {tgt}): {len(combined)} records")
+            logging.info(f"Gas data points: {combined['gas_data_available'].sum()}")
+            logging.info(f"Particle data points: {combined['particle_data_available'].sum()}")
+
+            # VOC considerations: VOC is 30-min native. Record compatibility for downstream.
+            self.voc_expected_timebase = "30min"
+            self.voc_compatible = (tgt == "30min")
+            if self.include_voc and not self.voc_compatible:
+                logging.warning("VOC data is 30-min native; target_timebase != 30min. Downstream integration should either switch to 30min or exclude VOC.")
+
+            return combined
+        
         except Exception as e:
             logging.error(f"Error aligning data: {str(e)}")
             return None
 
     def save_to_parquet(self, df, station_name, all_units):
-        """Save DataFrame to parquet with units metadata."""
+        """Save DataFrame to parquet with units and aggregation metadata."""
         try:
             import pyarrow as pa
             import pyarrow.parquet as pq
@@ -248,12 +309,25 @@ class MMFProcessor:
                     metadata[f"{col}_unit"] = 'timestamp'
                 elif 'available' in col:
                     metadata[f"{col}_unit"] = 'boolean'
+                elif col.startswith('n_'):
+                    metadata[f"{col}_unit"] = 'count'
             
             # Add processing metadata
             metadata['processing_date'] = datetime.now().isoformat()
             metadata['station'] = station_name
-            metadata['data_frequency'] = '5min'
+            metadata['native_timebase_gas'] = '5min'
+            metadata['native_timebase_particle'] = '15min'
+            metadata['voc_expected_timebase'] = '30min'
+            metadata['include_voc'] = self.include_voc
+            metadata['voc_compatible'] = self.voc_compatible if hasattr(self, 'voc_compatible') else False
+            metadata['aggregation_timebase'] = self.target_timebase
+            metadata['aggregation_method'] = self.aggregate_method
+            metadata['min_valid_subsamples'] = self.min_valid_subsamples
             metadata['source'] = 'MMF Excel files'
+            if self.filter_start is not None:
+                metadata['filter_start'] = str(self.filter_start)
+            if self.filter_end is not None:
+                metadata['filter_end'] = str(self.filter_end)
             
             # Convert metadata to bytes for PyArrow
             arrow_metadata = {k.encode(): str(v).encode() for k, v in metadata.items()}
@@ -266,8 +340,8 @@ class MMFProcessor:
             # Save with metadata
             pq.write_table(table, output_path)
             
-            logging.info(f"Saved parquet file with units metadata: {output_path} ({len(df)} records)")
-            logging.info(f"Units stored: {len([k for k in metadata.keys() if k.endswith('_unit')])} columns")
+            logging.info(f"Saved parquet file with units/aggregation metadata: {output_path} ({len(df)} records)")
+            logging.info(f"Units/metadata stored: {len(metadata)} entries")
             
             # Create metadata file
             metadata_path = self.output_dir / f"{station_name}_metadata.txt"
@@ -277,11 +351,18 @@ class MMFProcessor:
                 f.write(f"File: {station_name}_combined_data.parquet\n")
                 f.write(f"Records: {len(df)}\n")
                 f.write(f"Date range: {df['datetime'].min()} to {df['datetime'].max()}\n")
-                f.write(f"Time interval: 5 minutes\n\n")
+                f.write(f"Aggregation timebase: {self.target_timebase}\n")
+                if self.filter_start is not None or self.filter_end is not None:
+                    f.write(f"Filter window: {self.filter_start or 'None'} to {self.filter_end or 'None'}\n")
+                f.write(f"Aggregation method: {self.aggregate_method}\n")
+                f.write(f"Min valid subsamples: {self.min_valid_subsamples}\n")
+                f.write(f"VOC compatible with timebase: {self.voc_compatible if hasattr(self, 'voc_compatible') else False}\n\n")
                 
                 f.write("Processing notes:\n")
-                f.write("- Gas data: 5-minute intervals (original frequency)\n")
-                f.write("- Particle data: 15-minute intervals forward-filled to 5-minute\n")
+                f.write("- Gas data: 5-minute native, aggregated to target timebase\n")
+                f.write("- Particle data: 15-minute native, aggregated to target timebase as needed\n")
+                f.write("- No forward-fill applied; aggregation enforces minimum coverage and preserves NaNs\n")
+                f.write("- Count columns prefixed with 'n_' provide the number of valid sub-samples per window per species\n")
                 f.write("- Missing values preserved as NaN\n")
                 f.write("- Timezone information removed for consistency\n\n")
                 
@@ -289,7 +370,9 @@ class MMFProcessor:
                 for col in df.columns:
                     f.write(f"  {col}")
                     # Add units based on column names
-                    if 'H2S' in col or 'SO2' in col:
+                    if col.startswith('n_'):
+                        f.write(" (count)")
+                    elif 'H2S' in col or 'SO2' in col:
                         f.write(" (ug/m3)")
                     elif 'CH4' in col:
                         f.write(" (mg/m3)")
@@ -310,7 +393,6 @@ class MMFProcessor:
                     f.write("\n")
             
             return True
-            
         except Exception as e:
             logging.error(f"Error saving parquet for {station_name}: {str(e)}")
             return False
@@ -367,20 +449,24 @@ class MMFProcessor:
             sheets = excel_file.sheet_names
             logging.info(f"Available sheets: {sheets}")
             
-            if len(sheets) < 3:
-                logging.error(f"Expected 3 sheets, found {len(sheets)}")
-                return False
+            # Select gas/particle sheets
+            if self.gas_sheet and self.gas_sheet in sheets:
+                gas_sheet = self.gas_sheet
+            else:
+                gas_sheet = sheets[1] if len(sheets) > 1 else sheets[0]
+            if self.particle_sheet and self.particle_sheet in sheets:
+                particle_sheet = self.particle_sheet
+            else:
+                particle_sheet = sheets[2] if len(sheets) > 2 else sheets[-1]
             
-            # Read gas data (5-minute, typically sheet 1)
-            gas_sheet = sheets[1]
+            # Read gas data (5-minute)
             logging.info(f"Processing gas data from sheet: {gas_sheet}")
             gas_data, gas_units = self.read_sheet_data(filepath, gas_sheet)
             if gas_data is None:
                 logging.error(f"Failed to read gas data from {gas_sheet}")
                 return False
             
-            # Read particle data (15-minute, typically sheet 2)
-            particle_sheet = sheets[2]
+            # Read particle data (15-minute)
             logging.info(f"Processing particle data from sheet: {particle_sheet}")
             particle_data, particle_units = self.read_sheet_data(filepath, particle_sheet)
             if particle_data is None:
@@ -413,14 +499,50 @@ class MMFProcessor:
             return False
 
 def main():
-    processor = MMFProcessor()
+    import argparse
+    parser = argparse.ArgumentParser(description='Process MMF Excel files into aligned parquet with aggregation')
+    parser.add_argument('--output-dir', default='mmf_parquet', help='Output directory for parquet files')
+    parser.add_argument('--station', choices=['MMF1','MMF2','MMF6','MMF9','Maries_Way'], help='Station code for explicit processing with --raw-excel')
+    parser.add_argument('--raw-excel', help='Absolute path to the raw Excel file to process (no fallback used when provided)')
+    parser.add_argument('--sheet-gas', help='Explicit gas sheet name (optional)')
+    parser.add_argument('--sheet-particle', help='Explicit particle sheet name (optional)')
+    parser.add_argument('--start-date', help='Global filter start date (YYYY-MM-DD) applied after alignment')
+    parser.add_argument('--end-date', help='Global filter end date (YYYY-MM-DD) applied after alignment')
+    parser.add_argument('--timebase', choices=['15min','30min'], default='15min', help='Target aggregation timebase (default: 15min)')
+    parser.add_argument('--aggregate', choices=['mean','median'], default='mean', help='Aggregation method for resampling (default: mean)')
+    parser.add_argument('--min-valid-subsamples', type=int, default=2, help='Minimum sub-samples required in a window to compute aggregate (default: 2)')
+    parser.add_argument('--include-voc', action='store_true', help='Indicate VOC (30min) will be included downstream (records compatibility)')
+    args = parser.parse_args()
+
+    processor = MMFProcessor(output_dir=args.output_dir, target_timebase=args.timebase, aggregate_method=args.aggregate, min_valid_subsamples=args.min_valid_subsamples, include_voc=args.include_voc,
+                             filter_start=args.start_date, filter_end=args.end_date, gas_sheet=args.sheet_gas, particle_sheet=args.sheet_particle)
     
-    # Define MMF files
+    # If explicit raw Excel path is provided, process only that station without any fallback
+    raw_excel_path = getattr(args, 'raw_excel', None)
+    if raw_excel_path:
+        if not args.station:
+            logging.error("--station must be provided when using --raw-excel")
+            return
+        filepath = Path(raw_excel_path)
+        if not filepath.exists():
+            logging.error(f"Raw Excel file not found: {filepath}")
+            return
+        logging.info(f"\nStarting processing of {args.station} (explicit raw Excel)...")
+        success = processor.process_mmf_file(filepath, args.station)
+        logging.info("\n" + "="*60)
+        logging.info("PROCESSING COMPLETE!")
+        logging.info(f"Successful: {[args.station] if success else []}")
+        logging.info(f"Failed: {[] if success else [args.station]}")
+        logging.info(f"Results saved to: {processor.output_dir}")
+        logging.info("="*60)
+        return
+
+    # Define MMF files using actual raw/ directory paths (hash-prefixed filenames)
     mmf_files = {
-        'MMF1': Path('mmf_data/MMF1/processed/Silverdale Ambient Air Monitoring Data - MMF1 - Mar 21 to Aug 23.xlsx'),
-        'MMF2': Path('mmf_data/MMF2/processed/Silverdale Ambient Air Monitoring Data - MMF2 - Mar 21 to Aug 23.xlsx'),
-        'MMF6': Path('mmf_data/MMF6/processed/Silverdale Ambient Air Monitoring Data - MMF6 - Mar 21 to June 23.xlsx'),
-        'MMF9': Path('mmf_data/MMF9/processed/Silverdale Ambient Air Monitoring Data - MMF9 - Mar 21 to Aug 23.xlsx')
+        'MMF1': Path('mmf_data_corrected/MMF1_Cemetery_Road/raw/7969ed6f77e41d4fd840a70cd840d42f_Silverdale_Ambient_Air_Monitoring_Data_-_Cemetery_Road_-_Mar_2021_-_Aug_2024.xlsx'),
+        'MMF2': Path('mmf_data_corrected/MMF2_Silverdale_Pumping_Station/raw/c39163361bc4854cac6f969b148b4c64_Silverdale Ambient Air Monitoring Data - MMF Silverdale Pumping Station - Mar 2021 to July 2025.xlsx'),
+        'MMF6': None,  # No raw Excel file available for MMF6
+        'MMF9': Path('mmf_data_corrected/MMF9_Galingale_View/raw/61379dace1c94403959b18fbd97184b7_Silverdale Ambient Air Monitoring Data -MMF Galingale View - Mar 2021 to Jul 2025.xlsx')
     }
     
     successful = []
@@ -428,6 +550,24 @@ def main():
     
     # Process one file at a time
     for station, filepath in mmf_files.items():
+        if filepath is None:
+            logging.warning(f"No raw Excel file available for {station}, skipping")
+            failed.append(station)
+            continue
+            
+        if not filepath.exists():
+            # Fallback: search corrected data tree for any Excel source under station-specific folder
+            base_dir = Path('mmf_data_corrected')
+            candidates = []
+            station_dir = base_dir / station
+            if station_dir.exists():
+                candidates = list(station_dir.rglob('*.xlsx'))
+            if not candidates:
+                # Broad search for files containing station code in path
+                candidates = [p for p in base_dir.rglob('*.xlsx') if station in str(p)]
+            if candidates:
+                logging.warning(f"File not found: {filepath}. Using fallback: {candidates[0]}")
+                filepath = candidates[0]
         if filepath.exists():
             logging.info(f"\nStarting processing of {station}...")
             if processor.process_mmf_file(filepath, station):
@@ -435,7 +575,7 @@ def main():
             else:
                 failed.append(station)
         else:
-            logging.error(f"File not found: {filepath}")
+            logging.error(f"File not found for {station}: {filepath}")
             failed.append(station)
     
     # Create overall report
