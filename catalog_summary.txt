@@ -1,0 +1,12 @@
+Report Catalog Summary
+====================
+
+Total Reports: 59
+
+Breakdown by Category:
+Final Report: 3 reports
+Health Risk Assessment: 1 reports
+Interim Report: 1 reports
+Monthly Report: 52 reports
+Other: 1 reports
+Task Specific Analysis: 1 reports
