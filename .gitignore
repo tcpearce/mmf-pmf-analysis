@@ -1,0 +1,51 @@
+# Python cache and venvs
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+.env
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# MMF data directories (raw/processed/parquet)
+mmf_data/
+mmf_data_corrected/
+mmf_parquet/
+mmf_parquet_final/
+mmf_parquet_corrected/
+mmf_parquet_backup*/
+mmf_parquet_backup_btex_*/
+
+# Results/outputs and run artifacts
+pmf_results/
+pmf_results_esat/
+plots/
+mmf_survey_results/
+mmf_detailed_survey/
+test_controlled_run/
+test_fixed_html/
+test_pdf_run/
+VOC_run/
+monthly_campaign/
+sept23_feb24/
+
+# Large data file types (belt-and-braces)
+*.parquet
+*.feather
+*.arrow
+*.xlsx
+*.xlsm
+*.xls
+*.zip
+*.7z
+*.gz
+*.bz2
+
+# Logs, checkpoints, backups
+*.log
+.ipynb_checkpoints/
+*.bak
+*.tmp
