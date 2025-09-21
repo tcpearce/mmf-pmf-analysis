@@ -59,16 +59,16 @@ try:
     try:
         from esat.model.batch_sa import BatchSA
         USE_BATCH_SA = True
-        print("✅ ESAT BatchSA imported successfully")
+        print("[OK] ESAT BatchSA imported successfully")
     except ImportError as e:
         if "esat_rust" in str(e):
             from esat.model.sa import SA
             USE_BATCH_SA = False
-            print("⚠️ Using SA model (BatchSA requires esat_rust)")
+            print("[WARNING] Using SA model (BatchSA requires esat_rust)")
         else:
             raise e
 except ImportError:
-    print("❌ ESAT library not found. Please install it using:")
+    print("[ERROR] ESAT library not found. Please install it using:")
     print("   $env:CARGO_BUILD_TARGET = \"x86_64-pc-windows-msvc\"")
     print("   pip install git+https://github.com/quanted/esat.git")
     print("\nAlternatively, you can install dependencies:")
@@ -152,7 +152,12 @@ class ColorManager:
         return [self.species_colors[species] for species in self.species_names]
 
 class MMFPMFAnalyzer:
-    def __init__(self, station=None, data_dir=None, patterns=None, start_date=None, end_date=None, output_dir="pmf_results", remove_voc=False):
+    def __init__(self, station=None, data_dir=None, patterns=None, start_date=None, end_date=None, output_dir="pmf_results", 
+                 remove_voc=False, uncertainty_mode='legacy', uncertainty_ef_mdl=None, uncertainty_epsilon=1e-12,
+                 legacy_min_u=0.1, uncertainty_bdl_policy='five-sixth-mdl', snr_enable=False, snr_weak_threshold=2.0,
+                 snr_bad_threshold=0.2, snr_bdl_weak_frac=0.6, snr_bdl_bad_frac=0.8, snr_missing_weak_frac=0.2,
+                 snr_missing_bad_frac=0.4, exclude_bad=True, dashboard_snr_panel=True, write_diagnostics=True,
+                 seed=42):
         """
         Initialize PMF analyzer for MMF data.
         
@@ -164,6 +169,24 @@ class MMFPMFAnalyzer:
             end_date (str): End date in YYYY-MM-DD format
             output_dir (str): Directory for output files
             remove_voc (bool): If True, exclude VOC species from PMF analysis
+            
+            # EPA S/N weighting and uncertainty parameters (default to legacy behavior)
+            uncertainty_mode (str): 'epa' or 'legacy' - uncertainty calculation method
+            uncertainty_ef_mdl (str): Path to CSV with EF/MDL data (None = use built-ins)
+            uncertainty_epsilon (float): Numerical floor for uncertainties
+            legacy_min_u (float): Min uncertainty when using legacy mode
+            uncertainty_bdl_policy (str): BDL policy ('five-sixth-mdl' or 'half-mdl')
+            snr_enable (bool): Enable S/N-based feature categorization
+            snr_weak_threshold (float): S/N threshold for weak categorization
+            snr_bad_threshold (float): S/N threshold for bad categorization
+            snr_bdl_weak_frac (float): BDL fraction for weak categorization
+            snr_bdl_bad_frac (float): BDL fraction for bad categorization
+            snr_missing_weak_frac (float): Missing fraction for weak categorization
+            snr_missing_bad_frac (float): Missing fraction for bad categorization
+            exclude_bad (bool): Exclude bad features from PMF analysis
+            dashboard_snr_panel (bool): Add S/N panels to dashboard
+            write_diagnostics (bool): Write diagnostic CSVs
+            seed (int): Random seed for reproducibility
         """
         self.station = station
         self.data_dir = data_dir
@@ -180,7 +203,6 @@ class MMFPMFAnalyzer:
         # PMF Configuration following EPA guidelines
         self.factors = 4  # Will be optimized during analysis
         self.models = 20  # EPA recommends 20+ models for robust results
-        self.seed = 42
         
         # Data containers
         self.df = None
@@ -213,6 +235,24 @@ class MMFPMFAnalyzer:
         self.zero_as_bdl = True          # Treat exact zeros as BDL by default
         self.save_masks = True           # Save BDL/missing masks by default
         self.drop_row_threshold = 0.5    # Drop rows with >50% missing prior to replacement
+        
+        # EPA S/N weighting and uncertainty parameters (legacy defaults preserve behavior)
+        self.uncertainty_mode = uncertainty_mode
+        self.uncertainty_ef_mdl = uncertainty_ef_mdl
+        self.uncertainty_epsilon = uncertainty_epsilon
+        self.legacy_min_u = legacy_min_u
+        self.uncertainty_bdl_policy = uncertainty_bdl_policy
+        self.snr_enable = snr_enable
+        self.snr_weak_threshold = snr_weak_threshold
+        self.snr_bad_threshold = snr_bad_threshold
+        self.snr_bdl_weak_frac = snr_bdl_weak_frac
+        self.snr_bdl_bad_frac = snr_bdl_bad_frac
+        self.snr_missing_weak_frac = snr_missing_weak_frac
+        self.snr_missing_bad_frac = snr_missing_bad_frac
+        self.exclude_bad = exclude_bad
+        self.dashboard_snr_panel = dashboard_snr_panel
+        self.write_diagnostics = write_diagnostics
+        self.seed = seed
     
     def _create_filename_prefix(self):
         """Create standardized filename prefix with dates and identifier."""
@@ -4921,7 +4961,7 @@ def main():
 
     # EPA BDL/missing runtime controls
     parser.add_argument('--drop-row-threshold', type=float, default=0.5,
-                       help='Row drop threshold BEFORE replacement: drop rows with a fraction of missing values above this threshold (0–1, default: 0.5 → >50% missing)')
+                       help='Row drop threshold BEFORE replacement: drop rows with a fraction of missing values above this threshold (0-1, default: 0.5 -> >50%% missing)')
     zero_group = parser.add_mutually_exclusive_group()
     zero_group.add_argument('--zero-as-bdl', dest='zero_as_bdl', action='store_true',
                            help='Treat exact zeros as below detection limit (BDL) (default)')
@@ -4935,6 +4975,42 @@ def main():
     mask_group.add_argument('--no-save-masks', dest='save_masks', action='store_false',
                            help='Do not save BDL/missing mask CSVs')
     parser.set_defaults(save_masks=True)
+
+    # EPA S/N weighting and uncertainty controls (legacy defaults preserve current behavior)
+    parser.add_argument('--uncertainty-mode', choices=['epa', 'legacy'], default='legacy',
+                       help='Uncertainty calculation mode: epa (EPA formulas + 1/sqrt(n) + no global clamp) or legacy (current MDL+EF table with min clamp) (default: legacy)')
+    parser.add_argument('--uncertainty-ef-mdl', type=str, default=None,
+                       help='CSV file with EF/MDL table (columns: species, EF, MDL, unit). If not provided, uses built-in values.')
+    parser.add_argument('--uncertainty-epsilon', type=float, default=1e-12,
+                       help='Numerical floor for uncertainties (not a weighting clamp) (default: 1e-12)')
+    parser.add_argument('--legacy-min-u', type=float, default=0.1,
+                       help='Minimum uncertainty clamp when --uncertainty-mode=legacy (default: 0.1)')
+    parser.add_argument('--uncertainty-bdl-policy', choices=['five-sixth-mdl', 'half-mdl'], default='five-sixth-mdl',
+                       help='Policy for conc <= MDL: five-sixth-mdl (U = 5/6 * MDL) or half-mdl (U = 0.5 * MDL) (default: five-sixth-mdl)')
+    
+    parser.add_argument('--snr-enable', action='store_true', default=False,
+                       help='Enable S/N-based feature categorization (default: disabled to preserve legacy behavior)')
+    parser.add_argument('--snr-weak-threshold', type=float, default=2.0,
+                       help='S/N threshold for weak categorization (default: 2.0)')
+    parser.add_argument('--snr-bad-threshold', type=float, default=0.2,
+                       help='S/N threshold for bad categorization (excluded) (default: 0.2)')
+    parser.add_argument('--snr-bdl-weak-frac', type=float, default=0.6,
+                       help='BDL fraction threshold for weak categorization (default: 0.6)')
+    parser.add_argument('--snr-bdl-bad-frac', type=float, default=0.8,
+                       help='BDL fraction threshold for bad categorization (default: 0.8)')
+    parser.add_argument('--snr-missing-weak-frac', type=float, default=0.2,
+                       help='Missing fraction threshold for weak categorization (default: 0.2)')
+    parser.add_argument('--snr-missing-bad-frac', type=float, default=0.4,
+                       help='Missing fraction threshold for bad categorization (default: 0.4)')
+    parser.add_argument('--exclude-bad', action='store_true', default=True,
+                       help='Exclude bad features from PMF analysis (default: enabled)')
+    
+    parser.add_argument('--dashboard-snr-panel', action='store_true', default=True,
+                       help='Add S/N and categorization panels to dashboard (default: enabled)')
+    parser.add_argument('--write-diagnostics', action='store_true', default=True,
+                       help='Write S/N metrics, categories, and weights summary CSVs (default: enabled)')
+    parser.add_argument('--seed', type=int, default=42,
+                       help='Random seed for reproducibility (default: 42)')
     
     args = parser.parse_args()
     
@@ -4965,7 +5041,24 @@ def main():
             start_date=args.start_date,
             end_date=args.end_date,
             output_dir=args.output_dir,
-            remove_voc=args.remove_voc
+            remove_voc=args.remove_voc,
+            # EPA S/N weighting and uncertainty parameters (legacy defaults preserve behavior)
+            uncertainty_mode=args.uncertainty_mode,
+            uncertainty_ef_mdl=args.uncertainty_ef_mdl,
+            uncertainty_epsilon=args.uncertainty_epsilon,
+            legacy_min_u=args.legacy_min_u,
+            uncertainty_bdl_policy=args.uncertainty_bdl_policy,
+            snr_enable=args.snr_enable,
+            snr_weak_threshold=args.snr_weak_threshold,
+            snr_bad_threshold=args.snr_bad_threshold,
+            snr_bdl_weak_frac=args.snr_bdl_weak_frac,
+            snr_bdl_bad_frac=args.snr_bdl_bad_frac,
+            snr_missing_weak_frac=args.snr_missing_weak_frac,
+            snr_missing_bad_frac=args.snr_missing_bad_frac,
+            exclude_bad=args.exclude_bad,
+            dashboard_snr_panel=args.dashboard_snr_panel,
+            write_diagnostics=args.write_diagnostics,
+            seed=args.seed
         )
         
         # Override default parameters if specified
@@ -4990,6 +5083,12 @@ def main():
         pmf.zero_as_bdl = args.zero_as_bdl
         pmf.save_masks = args.save_masks
         print(f"⚙️  BDL/Missing controls: drop-row-threshold={pmf.drop_row_threshold}, zero-as-bdl={pmf.zero_as_bdl}, save-masks={pmf.save_masks}")
+        
+        # Show EPA S/N weighting settings
+        print(f"🔬 EPA S/N weighting: uncertainty-mode={pmf.uncertainty_mode}, snr-enable={pmf.snr_enable}")
+        if pmf.snr_enable:
+            print(f"   S/N thresholds: weak<{pmf.snr_weak_threshold}, bad<{pmf.snr_bad_threshold}")
+            print(f"   Data quality: BDL weak>{pmf.snr_bdl_weak_frac*100:.0f}%, bad>{pmf.snr_bdl_bad_frac*100:.0f}%")
         
         # Run analysis workflow
         pmf.load_mmf_data()
