@@ -430,3 +430,38 @@ python pmf_source_apportionment_fixed.py --data-dir mmf_test_30min --patterns "*
 ```
 
 **Next Steps**: Ready for Commit 5 (A/B validation protocol comparing legacy vs EPA modes).
+
+## 2025-09-21 17:57 - Dashboard Table Format Fix ✅
+
+**Summary**: Fixed HTML table structure bug in CLI flags section of PMF dashboard.
+
+**Issue**: CLI parameter table had incorrect HTML structure where parameter descriptions were concatenated with values in the same table cell instead of using separate `<td>` elements, resulting in malformed table display.
+
+**Files Modified**:
+- `pmf_source_apportionment_fixed.py` - Fixed `_get_cli_flags_html_section()` method
+
+**Changes Made**:
+- Modified parameter descriptions dictionary structure to separate values from descriptions
+- Updated HTML table generation to use proper three-column structure: Parameter | Value | Description  
+- Each table row now correctly uses separate `<td>` elements: `<tr><td>--param</td><td>value</td><td>description</td></tr>`
+
+**Before (incorrect)**:
+```
+Parameter | Value
+--uncertainty-mode | legacy - Uncertainty calculation method
+--snr-enable | True - EPA S/N-based feature categorization
+```
+
+**After (correct)**:
+```
+Parameter | Value | Description
+--uncertainty-mode | legacy | Uncertainty calculation method
+--snr-enable | True | EPA S/N-based feature categorization
+```
+
+**Test Results**:
+- Generated dashboard with correct table formatting using test command
+- All CLI parameters now display properly in separate columns
+- Table structure validates correctly in HTML
+
+**Impact**: Dashboard CLI reproducibility section now displays parameter information clearly in properly formatted table structure, improving user experience and readability.

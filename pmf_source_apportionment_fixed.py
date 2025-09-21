@@ -1984,20 +1984,20 @@ class MMFPMFAnalyzer:
                     <tr><th>Parameter</th><th>Value</th><th>Description</th></tr>
         """
         
-        # Parameter descriptions
-        param_descriptions = {
-            'uncertainty_mode': f'{cli_params["uncertainty_mode"]} - Uncertainty calculation method',
-            'snr_enable': f'{cli_params["snr_enable"]} - EPA S/N-based feature categorization',
-            'snr_weak_threshold': f'{cli_params["snr_weak_threshold"]} - S/N threshold for weak species',
-            'snr_bad_threshold': f'{cli_params["snr_bad_threshold"]} - S/N threshold for bad species',
-            'exclude_bad': f'{cli_params["exclude_bad"]} - Exclude bad species from analysis',
-            'seed': f'{cli_params["seed"]} - Random seed for reproducibility',
-            'write_diagnostics': f'{cli_params["write_diagnostics"]} - Write diagnostic CSV files',
+        # Parameter descriptions - separate values and descriptions
+        param_info = {
+            'uncertainty_mode': (cli_params["uncertainty_mode"], 'Uncertainty calculation method'),
+            'snr_enable': (cli_params["snr_enable"], 'EPA S/N-based feature categorization'),
+            'snr_weak_threshold': (cli_params["snr_weak_threshold"], 'S/N threshold for weak species'),
+            'snr_bad_threshold': (cli_params["snr_bad_threshold"], 'S/N threshold for bad species'),
+            'exclude_bad': (cli_params["exclude_bad"], 'Exclude bad species from analysis'),
+            'seed': (cli_params["seed"], 'Random seed for reproducibility'),
+            'write_diagnostics': (cli_params["write_diagnostics"], 'Write diagnostic CSV files'),
         }
         
-        for param, desc in param_descriptions.items():
+        for param, (value, description) in param_info.items():
             html_section += f"""
-                    <tr><td>--{param.replace('_', '-')}</td><td>{desc}</td></tr>
+                    <tr><td>--{param.replace('_', '-')}</td><td>{value}</td><td>{description}</td></tr>
             """
         
         html_section += """
