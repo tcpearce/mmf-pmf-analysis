@@ -85,6 +85,20 @@ The current focus is on completing the temporal alignment pipeline test to ensur
 - **Generated Files**: Concentrations, uncertainties, counts, BDL/missing masks, dashboard, report
 - **Key Achievement**: Temporal aggregation pipeline eliminates forward-fill bias and provides proper uncertainty scaling
 
+**14:26 - CRITICAL DATA ISSUES DISCOVERED**
+- **Problems Found**:
+  1. Dashboard shows unrealistic CH4 contributions (very large values)
+  2. Wind speed constant at 6 m/s across all records
+  3. Wind direction not changing (appears constant)
+  4. Sankey diagram broken/not displaying correctly
+- **Root Cause Found**: BUG in PMF analysis script's wind data processing
+- **Evidence**:
+  - Parquet file data is CORRECT: WD=72-333°, WS=0.22-2.37 m/s, varying properly
+  - PMF concentrations are CORRECT: CH4=1330-2087 μg/m³ (proper unit conversion)
+  - Wind summary shows WRONG values: WD=6.0°-6.0°, WS=6.0-6.0 m/s (constant)
+- **Issue Location**: Bug in pmf_source_apportionment_fixed.py wind analysis section
+- **Sankey Issue**: Likely related to data processing bug affecting factor-species flows
+
 **13:30 - Discovered and fixed units row parsing bug**
 - **Issue Found**: MMF2 processing completed but output parquet only contains datetime and availability flags, no concentration data or count columns
 - **Root Cause**: Excel files have units in row immediately after headers (row 1), causing all columns to be treated as strings instead of numeric
