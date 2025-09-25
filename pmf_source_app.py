@@ -71,14 +71,16 @@ except ImportError:
 # Import ESAT modules
 try:
     import esat
-    # Try BatchSA first, fallback to SA if esat_rust is missing
+    # Always import SA for robust mode compatibility
+    from esat.model.sa import SA
+    
+    # Try BatchSA, fallback gracefully if esat_rust is missing
     try:
         from esat.model.batch_sa import BatchSA
         USE_BATCH_SA = True
         print("[OK] ESAT BatchSA imported successfully")
     except ImportError as e:
         if "esat_rust" in str(e):
-            from esat.model.sa import SA
             USE_BATCH_SA = False
             print("[WARNING] Using SA model (BatchSA requires esat_rust)")
         else:
@@ -173,7 +175,7 @@ class MMFPMFAnalyzer:
                  legacy_min_u=0.1, uncertainty_bdl_policy='five-sixth-mdl', snr_enable=False, snr_weak_threshold=2.0,
                  snr_bad_threshold=0.2, snr_bdl_weak_frac=0.6, snr_bdl_bad_frac=0.8, snr_missing_weak_frac=0.2,
                  snr_missing_bad_frac=0.4, exclude_bad=True, dashboard_snr_panel=True, write_diagnostics=True,
-                 seed=42):
+                 scale_units=True, seed=42, robust_fit=False, robust_alpha=4.0):
         """
         Initialize PMF analyzer for MMF data.
         
@@ -202,7 +204,10 @@ class MMFPMFAnalyzer:
             exclude_bad (bool): Exclude bad features from PMF analysis
             dashboard_snr_panel (bool): Add S/N panels to dashboard
             write_diagnostics (bool): Write diagnostic CSVs
+            scale_units (bool): Apply unit standardization (mg/m³→μg/m³, ng/m³→μg/m³)
             seed (int): Random seed for reproducibility
+            robust_fit (bool): Enable ESAT robust loss during SA training (single-model fallback)
+            robust_alpha (float): Robust cutoff alpha for uncertainty-scaled residuals
         """
         self.station = station
         self.data_dir = data_dir
@@ -268,7 +273,10 @@ class MMFPMFAnalyzer:
         self.exclude_bad = exclude_bad
         self.dashboard_snr_panel = dashboard_snr_panel
         self.write_diagnostics = write_diagnostics
+        self.scale_units = scale_units
         self.seed = seed
+        self.robust_fit = robust_fit
+        self.robust_alpha = robust_alpha
     
     def _create_filename_prefix(self):
         """Create standardized filename prefix with dates and identifier."""
@@ -522,8 +530,11 @@ class MMFPMFAnalyzer:
         else:
             self.counts_data = None
 
-        # Standardize all concentrations to μg/m³ prior to computing uncertainties
-        self._standardize_units_to_ugm3(pollutant_columns)
+        # Standardize all concentrations to μg/m³ prior to computing uncertainties (if enabled)
+        if self.scale_units:
+            self._standardize_units_to_ugm3(pollutant_columns)
+        else:
+            print("⚠️  Unit standardization disabled (--no-scale-units). Units will be used as-is.")
         
         # Remove rows with too many missing values (EPA recommendation: >50% missing)
         missing_threshold = getattr(self, 'drop_row_threshold', 0.5)
@@ -724,7 +735,8 @@ class MMFPMFAnalyzer:
         calculator = create_epa_uncertainty_calculator(
             epsilon=self.uncertainty_epsilon,
             bdl_policy=self.uncertainty_bdl_policy,
-            ef_mdl_csv=self.uncertainty_ef_mdl
+            ef_mdl_csv=self.uncertainty_ef_mdl,
+            legacy_min_u=self.legacy_min_u
         )
         
         # Display policy summary
@@ -782,7 +794,11 @@ class MMFPMFAnalyzer:
                 if bdl_mask.any():
                     self.concentration_data.loc[bdl_mask, species] = MDL * 0.5
                 if missing_mask.any():
-                    self.concentration_data.loc[missing_mask, species] = MDL
+                    species_median = conc_col.median()
+                    if pd.isna(species_median):
+                        # Fallback if median cannot be computed
+                        species_median = MDL
+                    self.concentration_data.loc[missing_mask, species] = species_median
                 
                 # Summary statistics
                 total = len(conc_col)
@@ -1150,10 +1166,16 @@ class MMFPMFAnalyzer:
         # Optimize number of factors (EPA recommendation: try multiple values)
         self._optimize_factors(V, U)
         
+        # Check if robust mode is requested - force single SA if needed
+        use_batch_sa = USE_BATCH_SA
+        if self.robust_fit and USE_BATCH_SA:
+            print("⚠️  Robust mode requested: forcing single SA mode (BatchSA doesn't support robust training)")
+            use_batch_sa = False
+        
         # Run PMF models
         print(f"🔄 Running {self.models} PMF models with {self.factors} factors...")
         try:
-            if USE_BATCH_SA:
+            if use_batch_sa:
                 # Use BatchSA for multiple models
                 self.batch_models = BatchSA(
                     V=V, U=U, 
@@ -1185,19 +1207,57 @@ class MMFPMFAnalyzer:
                 )
                 self._display_q_interpretation(interpretation)
             else:
-                # Use regular SA model (single model run)
-                print("⚠️ Using single SA model (BatchSA not available)")
-                self.best_model = SA(
-                    V=V, U=U, 
-                    factors=self.factors,
-                    method="ls-nmf",
-                    seed=self.seed,
-                    verbose=True
-                )
+                # Use multiple SA models (manual implementation for robust mode)
+                if self.robust_fit:
+                    print(f"🔧 Running {self.models} SA models with ROBUST mode (alpha={self.robust_alpha})")
+                    print("   → Robust training will downweight outliers during optimization")
+                else:
+                    print(f"⚠️ Running {self.models} SA models (BatchSA not available or disabled)")
                 
-                self.best_model.train()
+                # Run multiple SA models and select the best one (keep only best to save memory)
+                best_model = None
+                best_q_robust = float('inf')
+                best_idx = 0
                 
-                print(f"✅ SA model complete")
+                for model_idx in range(self.models):
+                    print(f"   🔄 Training model {model_idx + 1}/{self.models}...")
+                    
+                    # Create SA model with different seed for each run
+                    model_seed = self.seed + model_idx if self.seed else None
+                    sa_model = SA(
+                        V=V, U=U, 
+                        factors=self.factors,
+                        method="ls-nmf",
+                        seed=model_seed,
+                        verbose=False  # Reduce verbosity for multiple models
+                    )
+                    
+                    # Train with optional robust mode if requested
+                    sa_model.train(robust_mode=self.robust_fit, robust_alpha=self.robust_alpha)
+                    
+                    print(f"     Model {model_idx + 1}: Q(true)={sa_model.Qtrue:.2f}, Q(robust)={sa_model.Qrobust:.2f}")
+                    
+                    # Keep only the best model (lowest Q(robust))
+                    if sa_model.Qrobust < best_q_robust:
+                        best_q_robust = sa_model.Qrobust
+                        best_idx = model_idx
+                        # Replace previous best model to save memory
+                        best_model = sa_model
+                    # Discard current model if it's not the best (memory management)
+                
+                # Set best model
+                self.best_model = best_model
+                
+                # Create a simple mock for compatibility with model quality plots
+                class MockBatchSA:
+                    def __init__(self, best_idx, best_model_obj):
+                        self.best_model = best_idx
+                        # Create single-item results list for compatibility
+                        self.results = [best_model_obj]
+                
+                self.batch_models = MockBatchSA(best_idx, best_model)
+                
+                print(f"✅ Best model: #{best_idx + 1} (Q(robust)={best_q_robust:.2f})")
                 print(f"   Q(true): {self.best_model.Qtrue:.2f}")
                 print(f"   Q(robust): {self.best_model.Qrobust:.2f}")
             
@@ -1228,8 +1288,14 @@ class MMFPMFAnalyzer:
         
         print("🔍 Optimizing number of factors...")
         
-        if not USE_BATCH_SA:
-            print("⚠️ Skipping factor optimization (requires BatchSA)")
+        # Check if BatchSA is available (considering robust mode override)
+        use_batch_for_optimization = USE_BATCH_SA and not self.robust_fit
+        
+        if not use_batch_for_optimization:
+            if self.robust_fit:
+                print("⚠️ Skipping factor optimization (robust mode requires single SA)")
+            else:
+                print("⚠️ Skipping factor optimization (requires BatchSA)")
             self.factors = 4  # Use default
             return
         
@@ -1922,6 +1988,10 @@ class MMFPMFAnalyzer:
             'snr_missing_bad_frac': self.snr_missing_bad_frac,
             'exclude_bad': self.exclude_bad,
             
+            # Robust training
+            'robust_fit': getattr(self, 'robust_fit', False),
+            'robust_alpha': getattr(self, 'robust_alpha', 4.0),
+            
             # Output controls
             'dashboard_snr_panel': getattr(self, 'dashboard_snr_panel', True),
             'write_diagnostics': self.write_diagnostics,
@@ -1936,7 +2006,7 @@ class MMFPMFAnalyzer:
         """
         
         # Build command line
-        cmd_parts = ['python pmf_source_apportionment_fixed.py']
+        cmd_parts = ['python pmf_source_app.py']
         
         if cli_params['station']:
             cmd_parts.append(f"--station {cli_params['station']}")
@@ -1961,10 +2031,11 @@ class MMFPMFAnalyzer:
         
         # Add other non-default parameters
         non_defaults = {
-            'uncertainty_epsilon': (1e-12, cli_params['uncertainty_epsilon']),
+'uncertainty_epsilon': (1e-12, cli_params['uncertainty_epsilon']),
             'legacy_min_u': (0.1, cli_params['legacy_min_u']),
             'snr_weak_threshold': (2.0, cli_params['snr_weak_threshold']),
             'snr_bad_threshold': (0.2, cli_params['snr_bad_threshold']),
+            'robust_alpha': (4.0, cli_params['robust_alpha']),
             'seed': (42, cli_params['seed']),
         }
         
@@ -1986,8 +2057,10 @@ class MMFPMFAnalyzer:
         
         # Parameter descriptions - separate values and descriptions
         param_info = {
-            'uncertainty_mode': (cli_params["uncertainty_mode"], 'Uncertainty calculation method'),
+'uncertainty_mode': (cli_params["uncertainty_mode"], 'Uncertainty calculation method'),
             'snr_enable': (cli_params["snr_enable"], 'EPA S/N-based feature categorization'),
+            'robust_fit': (cli_params['robust_fit'], 'Use robust loss during SA training (fallback only)'),
+            'robust_alpha': (cli_params['robust_alpha'], 'Robust cutoff alpha for scaled residuals'),
             'snr_weak_threshold': (cli_params["snr_weak_threshold"], 'S/N threshold for weak species'),
             'snr_bad_threshold': (cli_params["snr_bad_threshold"], 'S/N threshold for bad species'),
             'exclude_bad': (cli_params["exclude_bad"], 'Exclude bad species from analysis'),
@@ -2067,9 +2140,9 @@ class MMFPMFAnalyzer:
                 <ul>
                     <li><strong>Above MDL:</strong> U = √((EF × conc)² + (0.5 × MDL)²)</li>
                     <li><strong>BDL Cases:</strong> V = MDL/2, U = {self.uncertainty_bdl_policy.replace('-', ' ').title()}</li>
-                    <li><strong>Missing Cases:</strong> V = MDL, U = 4 × MDL</li>
+                    <li><strong>Missing Cases:</strong> V = species median (fallback MDL), U = 4 × median (fallback 4 × MDL)</li>
                     <li><strong>EF/MDL Source:</strong> {'Built-in database' if not self.uncertainty_ef_mdl else f'Custom CSV: {self.uncertainty_ef_mdl}'}</li>
-                    <li><strong>Aggregation Scaling:</strong> Already included in EPA formulas</li>
+                    <li><strong>Aggregation Scaling:</strong> Applied as 1/√n when counts are available</li>
                 </ul>
             </div>
             """
@@ -2247,7 +2320,7 @@ class MMFPMFAnalyzer:
 ## Model Performance
 - **Q(true)**: {self.best_model.Qtrue:.2f}
 - **Q(robust)**: {self.best_model.Qrobust:.2f}
-- **Best Model Index**: {self.batch_models.best_model}
+- **Best Model Index**: {self.batch_models.best_model if self.batch_models else 'Single Model (Robust Mode)'}
 
 ## Species Analyzed
 """)
@@ -5726,8 +5799,168 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         return True
 
 
+def show_detailed_help():
+    """Show detailed descriptions of all CLI flags and their defaults."""
+    help_text = """
+[BOOKS] DETAILED CLI FLAG REFERENCE
+=============================================================================
+
+[FOLDER] DATA INPUT OPTIONS:
+  station               Station to analyze using built-in file mappings
+                        Choices: MMF1, MMF2, MMF6, MMF9, Maries_Way
+                        Alternative: use --data-dir + --patterns for custom files
+  
+  --data-dir PATH       Directory containing parquet files (flexible mode)
+                        Use with --patterns to specify file patterns
+                        
+  --patterns PATTERNS   Comma-separated parquet file patterns to match
+                        Example: "MMF2_combined_data.parquet,MMF9_*.parquet"
+                        
+  --start-date DATE     Start date in YYYY-MM-DD format (optional)
+                        Example: 2023-09-01
+                        
+  --end-date DATE       End date in YYYY-MM-DD format (optional)
+                        Example: 2023-09-30
+
+[FIRE] PMF ANALYSIS OPTIONS:
+  --factors N           Exact number of factors to use (no optimization)
+                        Range: 1-20, overrides --max-factors
+                        
+  --max-factors N       Maximum factors to test during optimization
+                        Default: 10, ignored if --factors specified
+                        
+  --models N            Number of PMF models to run for statistical robustness
+                        Default: 20, EPA recommends 20+ for reliable results
+                        Range: 1-100
+                        
+  --max-workers N       Parallel processes for PMF analysis
+                        Default: 2, increase for faster processing
+
+[OUTPUT] OUTPUT OPTIONS:
+  --output-dir PATH     Output directory for all results
+                        Default: pmf_results_esat
+                        
+  --run-pca             Run PCA analysis for comparison with PMF
+                        Adds PCA-PMF comparison plots to dashboard
+                        
+  --create-pdf          Create PDF version of HTML dashboard
+                        Requires Chrome/Edge browser or PDF libraries
+
+[FILTER] DATA FILTERING OPTIONS:
+  --remove-voc          Exclude VOC species from PMF analysis
+                        Removes: Benzene, Toluene, Ethylbenzene, Xylene
+                        
+  --scale-units         Apply unit standardization (DEFAULT)
+                        mg/m3 -> ug/m3 (*1000), ng/m3 -> ug/m3 (/1000)
+                        
+  --no-scale-units      Disable unit standardization
+                        Uses units as-is from source data
+
+[QUALITY] DATA QUALITY CONTROLS:
+  --drop-row-threshold F Drop rows with >F fraction missing values BEFORE replacement
+                        Default: 0.5 (drop rows with >50% missing)
+                        Range: 0.0-1.0
+                        
+  --zero-as-bdl         Treat exact zeros as below detection limit (DEFAULT)
+                        
+  --no-zero-as-bdl      Treat exact zeros as missing values instead
+  
+  --save-masks          Save BDL and missing value mask CSVs (DEFAULT)
+                        
+  --no-save-masks       Skip saving mask CSV files
+
+[EPA] EPA UNCERTAINTY OPTIONS:
+  --uncertainty-mode    Uncertainty calculation method
+                        Choices: 'epa' (EPA PMF 5.0 formulas + 1/sqrt(n) scaling)
+                                 'legacy' (MDL+EF table with min clamp)
+                        Default: legacy
+                        
+  --uncertainty-ef-mdl  CSV file with custom EF/MDL values
+                        Columns: species, EF, MDL, unit
+                        If not provided, uses built-in instrument specs
+                        
+  --uncertainty-epsilon F Numerical floor for uncertainties (stability)
+                        Default: 1e-12, not a weighting clamp
+                        
+  --legacy-min-u F      Minimum uncertainty clamp for legacy mode
+                        Default: 0.1, only applies when --uncertainty-mode=legacy
+                        
+  --uncertainty-bdl-policy BDL uncertainty policy for conc <= MDL
+                        Choices: 'five-sixth-mdl' (U = 5/6 * MDL)
+                                 'half-mdl' (U = 0.5 * MDL)
+                        Default: five-sixth-mdl
+
+[S/N] S/N CATEGORIZATION OPTIONS:
+  --snr-enable          Enable EPA S/N-based feature categorization
+                        Default: disabled (preserves legacy behavior)
+                        Categories: strong (S/N >= 2.0), weak (tripled uncertainty), bad (excluded)
+                        
+  --snr-weak-threshold F S/N threshold for weak categorization
+                        Default: 2.0, species with S/N < 2.0 are weak
+                        
+  --snr-bad-threshold F  S/N threshold for bad categorization (exclusion)
+                        Default: 0.2, species with S/N < 0.2 are excluded
+                        
+  --snr-bdl-weak-frac F  BDL fraction threshold for weak categorization
+                        Default: 0.6 (60% BDL makes species weak)
+                        
+  --snr-bdl-bad-frac F   BDL fraction threshold for bad categorization
+                        Default: 0.8 (80% BDL makes species bad/excluded)
+                        
+  --snr-missing-weak-frac F Missing fraction threshold for weak categorization
+                        Default: 0.2 (20% missing makes species weak)
+                        
+  --snr-missing-bad-frac F Missing fraction threshold for bad categorization
+                        Default: 0.4 (40% missing makes species bad/excluded)
+                        
+  --exclude-bad         Exclude bad species from PMF analysis (DEFAULT)
+                        Recommended to keep enabled
+                        
+  --dashboard-snr-panel Add S/N analysis panels to dashboard (DEFAULT)
+                        Shows S/N metrics and categorization results
+                        
+  --write-diagnostics   Write S/N metrics and categorization CSVs (DEFAULT)
+                        Saves detailed diagnostic information
+
+[ROBUST] ESAT ROBUST TRAINING (auto-switches to single SA mode):
+  --robust-fit           Enable robust loss during SA training (downweights large scaled residuals)
+                        Automatically forces single SA mode (BatchSA doesn't support robust params)
+  --robust-alpha F       Robust cutoff alpha for uncertainty-scaled residuals (default: 4.0)
+                        Higher values = more aggressive outlier downweighting
+
+[SEED] REPRODUCIBILITY:
+  --seed N              Random seed for reproducible results
+                        Default: 42, ensures consistent PMF solutions
+
+[HELP] HELP:
+  --help-detail         Show this detailed help (you're reading it now!)
+  -h, --help            Show standard help summary
+
+=============================================================================
+[EXAMPLES] EXAMPLE COMMANDS:
+
+# Basic analysis with station mapping:
+python pmf_source_app.py MMF9 --start-date 2023-09-01 --end-date 2023-09-30
+
+# EPA uncertainty mode with S/N categorization:
+python pmf_source_app.py MMF9 --uncertainty-mode epa --snr-enable --factors 7
+
+# Custom data directory with unit scaling disabled:
+python pmf_source_app.py --data-dir ./data --patterns "*.parquet" --no-scale-units
+
+# High-performance analysis with PDF output:
+python pmf_source_app.py MMF2 --models 50 --max-workers 4 --create-pdf --run-pca
+
+# Robust PMF training to downweight outliers (auto-switches to single SA mode):
+python pmf_source_app.py MMF9 --robust-fit --robust-alpha 3.0 --factors 5
+
+=============================================================================
+    """
+    print(help_text)
+
+
 def main():
-    parser = argparse.ArgumentParser(description='PMF Source Apportionment Analysis for MMF Data (ESAT Fixed)')
+    parser = argparse.ArgumentParser(description='PMF Source Apportionment Analysis for MMF Data', allow_abbrev=False)
     # Optional station argument (for backward compatibility)
     parser.add_argument('station', nargs='?', choices=['MMF1', 'MMF2', 'MMF6', 'MMF9', 'Maries_Way'],
                        help='MMF station to analyze (using corrected station mappings). Alternative: use --data-dir and --patterns')
@@ -5755,6 +5988,18 @@ def main():
                        help='Maximum number of parallel processes for PMF analysis (default: 2)')
     parser.add_argument('--remove-voc', action='store_true',
                        help='Remove VOC species (Benzene, Toluene, Ethylbenzene, Xylene) from PMF analysis')
+    
+    # Unit scaling control
+    scale_group = parser.add_mutually_exclusive_group()
+    scale_group.add_argument('--scale-units', dest='scale_units', action='store_true',
+                           help='Apply unit standardization: mg/m3->ug/m3 (*1000), ng/m3->ug/m3 (/1000) (default)')
+    scale_group.add_argument('--no-scale-units', dest='scale_units', action='store_false',
+                           help='Disable unit standardization - use units as-is from data')
+    parser.set_defaults(scale_units=True)
+    
+    # Detailed help option
+    parser.add_argument('--help-detail', action='store_true',
+                       help='Show detailed descriptions of all CLI flags and their defaults')
 
     # EPA BDL/missing runtime controls
     parser.add_argument('--drop-row-threshold', type=float, default=0.5,
@@ -5787,6 +6032,12 @@ def main():
     
     parser.add_argument('--snr-enable', action='store_true', default=False,
                        help='Enable S/N-based feature categorization (default: disabled to preserve legacy behavior)')
+    
+    # ESAT robust training options (automatically forces single SA mode)
+    parser.add_argument('--robust-fit', action='store_true', default=False,
+                       help='Use ESAT robust loss during SA training. Automatically switches to single SA mode (BatchSA does not support robust training). Downweights outliers via robust residual weighting.')
+    parser.add_argument('--robust-alpha', type=float, default=4.0,
+                       help='Robust cutoff alpha for uncertainty-scaled residuals (default: 4.0). Only effective when --robust-fit is enabled.')
     parser.add_argument('--snr-weak-threshold', type=float, default=2.0,
                        help='S/N threshold for weak categorization (default: 2.0)')
     parser.add_argument('--snr-bad-threshold', type=float, default=0.2,
@@ -5810,6 +6061,11 @@ def main():
                        help='Random seed for reproducibility (default: 42)')
     
     args = parser.parse_args()
+    
+    # Handle detailed help request
+    if args.help_detail:
+        show_detailed_help()
+        return 0
     
     # Validate arguments
     if not args.station and not (args.data_dir and args.patterns):
@@ -5855,7 +6111,10 @@ def main():
             exclude_bad=args.exclude_bad,
             dashboard_snr_panel=args.dashboard_snr_panel,
             write_diagnostics=args.write_diagnostics,
-            seed=args.seed
+            scale_units=args.scale_units,
+            seed=args.seed,
+            robust_fit=args.robust_fit,
+            robust_alpha=args.robust_alpha
         )
         
         # Override default parameters if specified

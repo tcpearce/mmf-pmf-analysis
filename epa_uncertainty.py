@@ -27,39 +27,48 @@ class EPAUncertaintyCalculator:
     Implements EPA-recommended uncertainty calculations for PMF analysis.
     """
     
-    def __init__(self, epsilon: float = 1e-12, bdl_policy: str = 'five-sixth-mdl'):
+    def __init__(self, epsilon: float = 1e-12, bdl_policy: str = 'five-sixth-mdl', legacy_min_u: float = 0.1):
         """
         Initialize EPA uncertainty calculator.
         
         Args:
             epsilon: Numerical floor for uncertainties (not a weighting clamp)
             bdl_policy: Policy for BDL handling ('five-sixth-mdl' or 'half-mdl')
+            legacy_min_u: Minimum uncertainty clamp (aligned with legacy mode)
         """
         self.epsilon = epsilon
         self.bdl_policy = bdl_policy
+        self.legacy_min_u = legacy_min_u
         
-        # Built-in EF and MDL values (can be overridden by CSV)
+        # Built-in EF and MDL values (ALIGNED WITH LEGACY MODE - pmf_source_app.py)
+        # FIXED 2025-01-25: Synchronized with legacy uncertainty parameters for consistent PMF fitting
         self.default_ef_mdl = {
-            # Gas species - based on instrument specifications and EPA guidance
-            'CH4': {'EF': 0.10, 'MDL': 50.0, 'unit': 'μg/m³'},   # 10% error fraction, 50 μg/m³ MDL
-            'H2S': {'EF': 0.15, 'MDL': 2.0, 'unit': 'μg/m³'},    # 15% error fraction, 2 μg/m³ MDL  
-            'NOX': {'EF': 0.12, 'MDL': 5.0, 'unit': 'μg/m³'},    # 12% error fraction, 5 μg/m³ MDL
-            'NO': {'EF': 0.12, 'MDL': 3.0, 'unit': 'μg/m³'},     # 12% error fraction, 3 μg/m³ MDL
-            'NO2': {'EF': 0.12, 'MDL': 4.0, 'unit': 'μg/m³'},    # 12% error fraction, 4 μg/m³ MDL
-            'SO2': {'EF': 0.12, 'MDL': 5.0, 'unit': 'μg/m³'},    # 12% error fraction, 5 μg/m³ MDL
+            # Gas species - aligned with legacy mode values
+            'CH4': {'EF': 0.10, 'MDL': 50.0, 'unit': 'μg/m³'},   # 10% error fraction, 50 μg/m³ MDL (legacy)
+            'H2S': {'EF': 0.15, 'MDL': 0.5, 'unit': 'μg/m³'},    # 15% error fraction, 0.5 μg/m³ MDL (legacy)  
+            'NOX': {'EF': 0.20, 'MDL': 1.0, 'unit': 'μg/m³'},    # 20% error fraction, 1.0 μg/m³ MDL (legacy)
+            'NO': {'EF': 0.20, 'MDL': 0.5, 'unit': 'μg/m³'},     # 20% error fraction, 0.5 μg/m³ MDL (legacy)
+            'NO2': {'EF': 0.20, 'MDL': 1.0, 'unit': 'μg/m³'},    # 20% error fraction, 1.0 μg/m³ MDL (legacy)
+            'SO2': {'EF': 0.15, 'MDL': 0.5, 'unit': 'μg/m³'},    # 15% error fraction, 0.5 μg/m³ MDL (legacy)
             
-            # VOC species - typically higher uncertainty due to sampling/analysis complexity
-            'Benzene': {'EF': 0.20, 'MDL': 1.0, 'unit': 'μg/m³'},
-            'Toluene': {'EF': 0.20, 'MDL': 1.2, 'unit': 'μg/m³'},
-            'Ethylbenzene': {'EF': 0.25, 'MDL': 1.5, 'unit': 'μg/m³'},
-            'Xylene': {'EF': 0.25, 'MDL': 2.0, 'unit': 'μg/m³'},
+            # VOC species - aligned with legacy mode values
+            'Benzene': {'EF': 0.10, 'MDL': 0.01, 'unit': 'μg/m³'},     # 10% error fraction, 0.01 μg/m³ MDL (legacy)
+            'Toluene': {'EF': 0.12, 'MDL': 0.02, 'unit': 'μg/m³'},      # 12% error fraction, 0.02 μg/m³ MDL (legacy)
+            'Ethylbenzene': {'EF': 0.15, 'MDL': 0.02, 'unit': 'μg/m³'}, # 15% error fraction, 0.02 μg/m³ MDL (legacy)
+            'Xylene': {'EF': 0.15, 'MDL': 0.02, 'unit': 'μg/m³'},       # 15% error fraction, 0.02 μg/m³ MDL (legacy)
+            'm&p-Xylene': {'EF': 0.15, 'MDL': 0.02, 'unit': 'μg/m³'},   # 15% error fraction, 0.02 μg/m³ MDL (legacy)
             
-            # Particle species - based on gravimetric/optical measurement uncertainties  
-            'PM1 FIDAS': {'EF': 0.15, 'MDL': 2.0, 'unit': 'μg/m³'},
-            'PM2.5 FIDAS': {'EF': 0.15, 'MDL': 3.0, 'unit': 'μg/m³'},
-            'PM4 FIDAS': {'EF': 0.15, 'MDL': 4.0, 'unit': 'μg/m³'},
-            'PM10 FIDAS': {'EF': 0.15, 'MDL': 5.0, 'unit': 'μg/m³'},
-            'TSP FIDAS': {'EF': 0.20, 'MDL': 10.0, 'unit': 'μg/m³'},
+            # Particle species - aligned with legacy mode values
+            'PM1 FIDAS': {'EF': 0.10, 'MDL': 1.0, 'unit': 'μg/m³'},   # 10% error fraction, 1.0 μg/m³ MDL (legacy)
+            'PM1': {'EF': 0.10, 'MDL': 1.0, 'unit': 'μg/m³'},         # 10% error fraction, 1.0 μg/m³ MDL (legacy)
+            'PM2.5 FIDAS': {'EF': 0.10, 'MDL': 1.0, 'unit': 'μg/m³'}, # 10% error fraction, 1.0 μg/m³ MDL (legacy)
+            'PM2.5': {'EF': 0.10, 'MDL': 1.0, 'unit': 'μg/m³'},       # 10% error fraction, 1.0 μg/m³ MDL (legacy)
+            'PM4 FIDAS': {'EF': 0.12, 'MDL': 1.5, 'unit': 'μg/m³'},   # 12% error fraction, 1.5 μg/m³ MDL (legacy)
+            'PM4': {'EF': 0.12, 'MDL': 1.5, 'unit': 'μg/m³'},         # 12% error fraction, 1.5 μg/m³ MDL (legacy)
+            'PM10 FIDAS': {'EF': 0.15, 'MDL': 2.0, 'unit': 'μg/m³'},  # 15% error fraction, 2.0 μg/m³ MDL (legacy)
+            'PM10': {'EF': 0.15, 'MDL': 2.0, 'unit': 'μg/m³'},        # 15% error fraction, 2.0 μg/m³ MDL (legacy)
+            'TSP FIDAS': {'EF': 0.20, 'MDL': 2.5, 'unit': 'μg/m³'},   # 20% error fraction, 2.5 μg/m³ MDL (legacy)
+            'TSP': {'EF': 0.20, 'MDL': 2.5, 'unit': 'μg/m³'},         # 20% error fraction, 2.5 μg/m³ MDL (legacy)
         }
         
         self.ef_mdl_data = None  # Will be loaded from CSV if provided
@@ -130,9 +139,10 @@ class EPAUncertaintyCalculator:
         """
         Calculate EPA-recommended uncertainties for a species.
         
-        EPA Formula:
+        EPA Formula (per EPA PMF 5.0):
         - If conc <= MDL: U = 5/6 * MDL (or 0.5 * MDL based on policy)
         - If conc > MDL:  U = sqrt((EF * conc)^2 + (0.5 * MDL)^2)
+        - Missing values: high uncertainty; common practice is U = 4 × species median concentration
         
         Args:
             concentrations: Array of concentration values
@@ -174,21 +184,28 @@ class EPAUncertaintyCalculator:
         # BDL uncertainties
         valid_uncertainties[bdl_mask] = bdl_uncertainty
         
-        # Above MDL uncertainties: sqrt((EF * conc)^2 + (0.5 * MDL)^2)
+        # Above MDL uncertainties: sqrt((EF * conc)^2 + (0.5 * MDL)^2) [EPA PMF 5.0 Eq. 5-2]
         if np.any(above_mdl_mask):
             conc_above = valid_conc[above_mdl_mask]
             valid_uncertainties[above_mdl_mask] = np.sqrt(
                 (EF * conc_above) ** 2 + (0.5 * MDL) ** 2
             )
         
-        # Apply epsilon floor for numerical stability
+        # Apply epsilon floor for numerical stability (EPA guidance does not prescribe a global clamp)
         valid_uncertainties = np.maximum(valid_uncertainties, self.epsilon)
         
         # Fill back into full array
         uncertainties[valid_mask] = valid_uncertainties
         
-        # For invalid/missing concentration, set uncertainty to epsilon 
-        uncertainties[~valid_mask] = self.epsilon
+        # For invalid/missing concentrations, set uncertainty high per EPA guidance
+        # EPA PMF practice: replace missing concentrations with species median and set Unc = 4 × median
+        # Here we set uncertainty to 4 × species median (fall back to 4 × MDL if median is not finite)
+        species_median = np.nanmedian(conc) if np.isfinite(np.nanmedian(conc)) else np.nan
+        fallback = 4.0 * MDL
+        missing_unc = 4.0 * species_median if np.isfinite(species_median) else fallback
+        # Enforce epsilon floor only
+        missing_unc = max(missing_unc, self.epsilon)
+        uncertainties[~valid_mask] = missing_unc
         
         return uncertainties
     
@@ -265,7 +282,8 @@ class EPAUncertaintyCalculator:
 
 def create_epa_uncertainty_calculator(epsilon: float = 1e-12, 
                                     bdl_policy: str = 'five-sixth-mdl',
-                                    ef_mdl_csv: Optional[str] = None) -> EPAUncertaintyCalculator:
+                                    ef_mdl_csv: Optional[str] = None,
+                                    legacy_min_u: float = 0.1) -> EPAUncertaintyCalculator:
     """
     Factory function to create and configure EPA uncertainty calculator.
     
@@ -273,11 +291,12 @@ def create_epa_uncertainty_calculator(epsilon: float = 1e-12,
         epsilon: Numerical floor for uncertainties  
         bdl_policy: BDL handling policy ('five-sixth-mdl' or 'half-mdl')
         ef_mdl_csv: Optional path to CSV with EF/MDL data
+        legacy_min_u: Minimum uncertainty clamp (aligned with legacy mode)
         
     Returns:
         Configured EPAUncertaintyCalculator instance
     """
-    calculator = EPAUncertaintyCalculator(epsilon=epsilon, bdl_policy=bdl_policy)
+    calculator = EPAUncertaintyCalculator(epsilon=epsilon, bdl_policy=bdl_policy, legacy_min_u=legacy_min_u)
     
     if ef_mdl_csv:
         calculator.load_ef_mdl_table(ef_mdl_csv)

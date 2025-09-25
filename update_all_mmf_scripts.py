@@ -41,7 +41,7 @@ SCRIPTS_TO_UPDATE = {
 
 # Scripts that need import statements added
 SCRIPTS_NEEDING_IMPORTS = [
-    'pmf_source_apportionment_fixed.py',
+        'pmf_source_app.py',
     'pmf_source_apportionment_weekly.py', 
     'pmf_complaint_integration.py'
 ]

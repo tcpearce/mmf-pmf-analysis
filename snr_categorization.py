@@ -54,39 +54,37 @@ class SNRCategorizer:
         
     def compute_snr_manual(self, concentrations: np.ndarray, uncertainties: np.ndarray) -> float:
         """
-        Manual S/N computation when ESAT DataHandler is not available.
+        Manual S/N computation matching EPA PMF 5.0 revised method (Eq. 5-3, 5-4).
         
-        S/N = mean(concentrations) / mean(uncertainties) for valid (finite) data
+        For each sample i with finite values and s_i > 0:
+          d_i = max((x_i - s_i) / s_i, 0)   if x_i > s_i else 0
+        S/N = mean(d_i) over all valid samples (zeros included for x_i <= s_i)
         
         Args:
-            concentrations: Array of concentration values
-            uncertainties: Array of uncertainty values
+            concentrations: Array of concentration values (x)
+            uncertainties: Array of uncertainty values (s)
             
         Returns:
             S/N ratio (float)
         """
-        # Ensure we have valid numeric data
+        # Ensure numeric arrays
         conc = np.asarray(concentrations, dtype=float)
         unc = np.asarray(uncertainties, dtype=float)
         
-        # Find valid data points (finite and positive)
-        valid_mask = (np.isfinite(conc) & np.isfinite(unc) & 
-                     (conc > 0) & (unc > 0))
-        
+        # Valid if both finite and s > 0
+        valid_mask = (np.isfinite(conc) & np.isfinite(unc) & (unc > 0))
         if not np.any(valid_mask):
-            return 0.0  # No valid data
-            
-        valid_conc = conc[valid_mask]
-        valid_unc = unc[valid_mask]
-        
-        # S/N = mean signal / mean noise
-        mean_conc = np.mean(valid_conc)
-        mean_unc = np.mean(valid_unc)
-        
-        if mean_unc <= 0:
             return 0.0
-            
-        return mean_conc / mean_unc
+        
+        x = conc[valid_mask]
+        s = unc[valid_mask]
+        
+        # d_i per EPA revised method
+        d = (x - s) / s
+        d[d < 0] = 0.0  # zero out when x <= s
+        
+        # S/N is mean of d (zeros included)
+        return float(np.mean(d))
     
     def compute_data_quality_metrics(self, concentrations: np.ndarray, 
                                    mdl: float) -> Dict[str, float]:

@@ -134,6 +134,8 @@ class ParquetAnalyzer:
             return 'mg/m³'
         elif any(pm in col_lower for pm in ['pm1', 'pm2.5', 'pm4', 'pm10', 'tsp']):
             return 'μg/m³'
+        elif any(voc in col_lower for voc in ['benzene', 'toluene', 'ethylbenzene', 'xylene']):
+            return 'μg/m³'
         elif 'wd' in col_lower:
             return 'degrees'
         elif 'ws' in col_lower:

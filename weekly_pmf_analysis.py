@@ -182,7 +182,7 @@ class WeeklyPMFAnalyzer:
         
         # Build command
         cmd = [
-            'python', 'pmf_source_apportionment_fixed.py',
+            'python', 'pmf_source_app.py',
             station,
             '--start-date', start_date_str,
             '--end-date', end_date_str,
@@ -477,7 +477,7 @@ class WeeklyPMFAnalyzer:
         
         # Build command
         cmd = [
-            'python', 'pmf_source_apportionment_fixed.py',
+            'python', 'pmf_source_app.py',
             station,
             '--start-date', start_date_str,
             '--end-date', end_date_str,

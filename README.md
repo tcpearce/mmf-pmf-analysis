@@ -16,7 +16,7 @@ Data files are not included in this repository by design. The .gitignore exclude
 - process_mmf_corrected.py — Reuses robust existing parsing to regenerate corrected parquet with station metadata
 - integrate_btex_data.py — Integrates 30‑minute BTEX VOC channels into MMF2/MMF9 parquet files (no interpolation)
 - plot_mmf_data.py — Multi‑panel plotting with numeric‑safe stats overlays
-- pmf_source_apportionment_fixed.py — ESAT‑based PMF analysis; saves dashboards, reports, and images
+- pmf_source_app.py — ESAT‑based PMF analysis; saves dashboards, reports, and images
 - mmf_site_survey.py — Reports station coverage, date ranges, and columns (with optional VOC details)
 - mmf_data_validation.py — Cross‑checks data availability vs official statements
 
@@ -62,13 +62,13 @@ python plot_mmf_data.py --station MMF2 --start 2024-01-01 --end 2024-01-31 --out
 2) PMF (ESAT) source apportionment (fixed script)
 
 ```bash
-python pmf_source_apportionment_fixed.py MMF2 \
+python pmf_source_app.py MMF2 \
   --start-date 2023-09-01 --end-date 2023-09-14 \
   --factors 4 --models 5 --max-workers 4 \
   --output-dir pmf_results_esat --run-pca --create-pdf
 ```
 
-Common flags in pmf_source_apportionment_fixed.py:
+Common flags in pmf_source_app.py:
 
 - station (positional): MMF1 | MMF2 | MMF6 | MMF9 | Maries_Way
 - --start-date, --end-date (YYYY-MM-DD)
