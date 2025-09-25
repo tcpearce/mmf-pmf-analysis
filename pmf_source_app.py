@@ -1214,8 +1214,6 @@ class MMFPMFAnalyzer:
                     method=self.method,  # Use configured method (ls-nmf or ws-nmf)
                     init_method=self.init_method,  # Use configured init method
                     init_norm=self.init_norm,  # Use configured init normalization
-                    hold_h=self.hold_h,  # Use configured H holding
-                    delay_h=self.delay_h,  # Use configured H delay
                     seed=self.seed,
                     cpus=self.max_workers,  # Control number of processes
                     verbose=True
@@ -1275,9 +1273,7 @@ class MMFPMFAnalyzer:
                     # Train with all configured parameters
                     sa_model.train(
                         robust_mode=self.robust_fit, 
-                        robust_alpha=self.robust_alpha,
-                        hold_h=self.hold_h,
-                        delay_h=self.delay_h if self.delay_h != -1 else None
+                        robust_alpha=self.robust_alpha
                     )
                     
                     print(f"     Model {model_idx + 1}: Q(true)={sa_model.Qtrue:.2f}, Q(robust)={sa_model.Qrobust:.2f}")
@@ -1370,8 +1366,6 @@ class MMFPMFAnalyzer:
                     method=self.method,  # Use consistent method for optimization
                     init_method=self.init_method,  # Use consistent init method
                     init_norm=self.init_norm,  # Use consistent init normalization
-                    hold_h=self.hold_h,  # Use consistent H holding
-                    delay_h=self.delay_h,  # Use consistent H delay
                     seed=self.seed,
                     cpus=self.max_workers,  # Control number of processes
                     verbose=False
