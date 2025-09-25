@@ -175,7 +175,8 @@ class MMFPMFAnalyzer:
                  legacy_min_u=0.1, uncertainty_bdl_policy='five-sixth-mdl', snr_enable=False, snr_weak_threshold=2.0,
                  snr_bad_threshold=0.2, snr_bdl_weak_frac=0.6, snr_bdl_bad_frac=0.8, snr_missing_weak_frac=0.2,
                  snr_missing_bad_frac=0.4, exclude_bad=True, dashboard_snr_panel=True, write_diagnostics=True,
-                 scale_units=True, seed=42, robust_fit=False, robust_alpha=4.0):
+                 scale_units=True, seed=42, robust_fit=False, robust_alpha=4.0,
+                 method="ls-nmf", init_method="column_mean", init_norm=True, hold_h=False, delay_h=-1):
         """
         Initialize PMF analyzer for MMF data.
         
@@ -208,6 +209,11 @@ class MMFPMFAnalyzer:
             seed (int): Random seed for reproducibility
             robust_fit (bool): Enable ESAT robust loss during SA training (single-model fallback)
             robust_alpha (float): Robust cutoff alpha for uncertainty-scaled residuals
+            method (str): ESAT NMF algorithm ('ls-nmf' for nonnegative, 'ws-nmf' for semi-NMF)
+            init_method (str): Matrix initialization method ('column_mean' or 'kmeans')
+            init_norm (bool): Whiten data before kmeans initialization (for magnitude balance)
+            hold_h (bool): Hold H (profile) matrix constant during training
+            delay_h (int): Hold H matrix for N iterations, then release (-1 = disabled)
         """
         self.station = station
         self.data_dir = data_dir
@@ -277,6 +283,30 @@ class MMFPMFAnalyzer:
         self.seed = seed
         self.robust_fit = robust_fit
         self.robust_alpha = robust_alpha
+        
+        # ESAT algorithm and initialization controls  
+        # Validate method
+        if method not in ['ls-nmf', 'ws-nmf']:
+            raise ValueError(f"Invalid method '{method}'. Must be 'ls-nmf' or 'ws-nmf'")
+        self.method = method
+        
+        # Validate init_method
+        if init_method not in ['column_mean', 'kmeans']:
+            raise ValueError(f"Invalid init_method '{init_method}'. Must be 'column_mean' or 'kmeans'")
+        self.init_method = init_method
+        
+        self.init_norm = bool(init_norm)
+        self.hold_h = bool(hold_h)
+        
+        # Validate delay_h
+        if delay_h != -1 and delay_h < 1:
+            raise ValueError(f"Invalid delay_h '{delay_h}'. Must be -1 (disabled) or positive integer")
+        self.delay_h = int(delay_h) if delay_h != -1 else -1
+        
+        # Validate parameter combinations
+        if self.delay_h > 0 and not self.hold_h:
+            print("⚠️  Warning: delay_h specified without hold_h. Setting hold_h=True for consistency.")
+            self.hold_h = True
     
     def _create_filename_prefix(self):
         """Create standardized filename prefix with dates and identifier."""
@@ -1181,7 +1211,11 @@ class MMFPMFAnalyzer:
                     V=V, U=U, 
                     factors=self.factors, 
                     models=self.models,
-                    method="ls-nmf",  # EPA-recommended method
+                    method=self.method,  # Use configured method (ls-nmf or ws-nmf)
+                    init_method=self.init_method,  # Use configured init method
+                    init_norm=self.init_norm,  # Use configured init normalization
+                    hold_h=self.hold_h,  # Use configured H holding
+                    delay_h=self.delay_h,  # Use configured H delay
                     seed=self.seed,
                     cpus=self.max_workers,  # Control number of processes
                     verbose=True
@@ -1227,13 +1261,24 @@ class MMFPMFAnalyzer:
                     sa_model = SA(
                         V=V, U=U, 
                         factors=self.factors,
-                        method="ls-nmf",
+                        method=self.method,  # Use configured method (ls-nmf or ws-nmf)
                         seed=model_seed,
                         verbose=False  # Reduce verbosity for multiple models
                     )
                     
-                    # Train with optional robust mode if requested
-                    sa_model.train(robust_mode=self.robust_fit, robust_alpha=self.robust_alpha)
+                    # Initialize matrices with configured parameters
+                    sa_model.initialize(
+                        init_method=self.init_method,
+                        init_norm=self.init_norm
+                    )
+                    
+                    # Train with all configured parameters
+                    sa_model.train(
+                        robust_mode=self.robust_fit, 
+                        robust_alpha=self.robust_alpha,
+                        hold_h=self.hold_h,
+                        delay_h=self.delay_h if self.delay_h != -1 else None
+                    )
                     
                     print(f"     Model {model_idx + 1}: Q(true)={sa_model.Qtrue:.2f}, Q(robust)={sa_model.Qrobust:.2f}")
                     
@@ -1322,7 +1367,11 @@ class MMFPMFAnalyzer:
                     V=V, U=U,
                     factors=n_factors,
                     models=3,  # Fewer models for optimization speed
-                    method="ls-nmf",
+                    method=self.method,  # Use consistent method for optimization
+                    init_method=self.init_method,  # Use consistent init method
+                    init_norm=self.init_norm,  # Use consistent init normalization
+                    hold_h=self.hold_h,  # Use consistent H holding
+                    delay_h=self.delay_h,  # Use consistent H delay
                     seed=self.seed,
                     cpus=self.max_workers,  # Control number of processes
                     verbose=False
@@ -1992,6 +2041,13 @@ class MMFPMFAnalyzer:
             'robust_fit': getattr(self, 'robust_fit', False),
             'robust_alpha': getattr(self, 'robust_alpha', 4.0),
             
+            # ESAT algorithm controls
+            'method': getattr(self, 'method', 'ls-nmf'),
+            'init_method': getattr(self, 'init_method', 'column_mean'),
+            'init_norm': getattr(self, 'init_norm', True),
+            'hold_h': getattr(self, 'hold_h', False),
+            'delay_h': getattr(self, 'delay_h', -1),
+            
             # Output controls
             'dashboard_snr_panel': getattr(self, 'dashboard_snr_panel', True),
             'write_diagnostics': self.write_diagnostics,
@@ -2028,6 +2084,12 @@ class MMFPMFAnalyzer:
             cmd_parts.append('--snr-enable')
         if cli_params['write_diagnostics']:
             cmd_parts.append('--write-diagnostics')
+        if cli_params['robust_fit']:
+            cmd_parts.append('--robust-fit')
+        if cli_params['hold_h']:
+            cmd_parts.append('--hold-h')
+        if not cli_params['init_norm']:
+            cmd_parts.append('--no-init-norm')
         
         # Add other non-default parameters
         non_defaults = {
@@ -2037,6 +2099,9 @@ class MMFPMFAnalyzer:
             'snr_bad_threshold': (0.2, cli_params['snr_bad_threshold']),
             'robust_alpha': (4.0, cli_params['robust_alpha']),
             'seed': (42, cli_params['seed']),
+            'method': ('ls-nmf', cli_params['method']),
+            'init_method': ('column_mean', cli_params['init_method']),
+            'delay_h': (-1, cli_params['delay_h']),
         }
         
         for param, (default, value) in non_defaults.items():
@@ -2058,6 +2123,11 @@ class MMFPMFAnalyzer:
         # Parameter descriptions - separate values and descriptions
         param_info = {
 'uncertainty_mode': (cli_params["uncertainty_mode"], 'Uncertainty calculation method'),
+            'method': (cli_params['method'], 'ESAT NMF algorithm (ls-nmf or ws-nmf)'),
+            'init_method': (cli_params['init_method'], 'Matrix initialization method'),
+            'init_norm': (cli_params['init_norm'], 'Normalize data before kmeans initialization'),
+            'hold_h': (cli_params['hold_h'], 'Hold H (profile) matrix constant during training'),
+            'delay_h': (cli_params['delay_h'], 'Hold H matrix for N iterations (-1 = disabled)'),
             'snr_enable': (cli_params["snr_enable"], 'EPA S/N-based feature categorization'),
             'robust_fit': (cli_params['robust_fit'], 'Use robust loss during SA training (fallback only)'),
             'robust_alpha': (cli_params['robust_alpha'], 'Robust cutoff alpha for scaled residuals'),
@@ -2123,6 +2193,9 @@ class MMFPMFAnalyzer:
                 <ul>
                     <li><strong>Uncertainty Mode:</strong> {self.uncertainty_mode} 
                         {('(EPA PMF 5.0 formulas)' if self.uncertainty_mode == 'epa' else '(Fixed MDL/EF table)')}</li>
+                    <li><strong>ESAT Algorithm:</strong> {self.method.upper()} {'(Semi-NMF, allows negative W)' if self.method == 'ws-nmf' else '(Standard PMF, nonnegative)'}</li>
+                    <li><strong>Initialization:</strong> {self.init_method.replace('_', ' ').title()}{(' with normalization' if self.init_norm else ' without normalization') if self.init_method == 'kmeans' else ''}</li>
+                    <li><strong>Matrix Updates:</strong> {'H held constant, ' if self.hold_h else ''}{'H delayed for ' + str(self.delay_h) + ' iterations, ' if self.delay_h > 0 else ''}Standard training</li>
                     <li><strong>Random Seed:</strong> {self.seed}</li>
                     <li><strong>Records Analyzed:</strong> {len(self.concentration_data):,}</li>
                     <li><strong>Original Species:</strong> {len(self.concentration_data.columns) + (len(getattr(self, '_excluded_species', [])))} 
@@ -2314,7 +2387,9 @@ class MMFPMFAnalyzer:
 ## Model Configuration
 - **Factors Resolved**: {self.factors}
 - **Models Run**: {self.models}
-- **Method**: Least Squares Non-negative Matrix Factorization (LS-NMF)
+- **ESAT Algorithm**: {self.method.upper()} ({'Semi-NMF (allows negative W)' if self.method == 'ws-nmf' else 'Least Squares NMF (standard PMF)'})
+- **Initialization**: {self.init_method.replace('_', ' ').title()}{' with normalization' if self.init_norm and self.init_method == 'kmeans' else ''}
+- **Training**: {'H held constant' if self.hold_h else 'H delayed ' + str(self.delay_h) + ' iterations' if self.delay_h > 0 else 'Standard W/H updates'}
 - **ESAT Version**: Working (Rust-optimized)
 
 ## Model Performance
@@ -5928,6 +6003,29 @@ def show_detailed_help():
   --robust-alpha F       Robust cutoff alpha for uncertainty-scaled residuals (default: 4.0)
                         Higher values = more aggressive outlier downweighting
 
+[ESAT] ESAT ALGORITHM AND INITIALIZATION CONTROLS:
+  --method               ESAT NMF algorithm selection
+                        Choices: ls-nmf (nonnegative, standard PMF behavior)
+                                ws-nmf (semi-NMF, allows negative contributions)
+                        Default: ls-nmf (recommended for PMF)
+                        
+  --init-method          Matrix initialization method
+                        Choices: column_mean (randomized by column statistics)
+                                kmeans (k-means clustering, better for magnitude differences)
+                        Default: column_mean
+                        
+  --init-norm            Whiten (normalize) data before kmeans initialization (DEFAULT)
+                        Reduces impact of cross-species magnitude differences
+  --no-init-norm         Disable whitening before kmeans initialization
+                        
+  --hold-h               Hold H (profile) matrix constant during training
+                        Use with --delay-h to stabilize early iterations
+                        Default: disabled
+                        
+  --delay-h N            Hold H matrix for N iterations, then release
+                        Requires --hold-h; lets W adapt first when species magnitudes vary
+                        Default: -1 (disabled)
+
 [SEED] REPRODUCIBILITY:
   --seed N              Random seed for reproducible results
                         Default: 42, ensures consistent PMF solutions
@@ -6060,6 +6158,24 @@ def main():
     parser.add_argument('--seed', type=int, default=42,
                        help='Random seed for reproducibility (default: 42)')
     
+    # ESAT Algorithm and Initialization Controls
+    parser.add_argument('--method', choices=['ls-nmf', 'ws-nmf'], default='ls-nmf',
+                       help='ESAT NMF method: ls-nmf (nonnegative, standard PMF) or ws-nmf (semi-NMF, allows negative W contributions) (default: ls-nmf)')
+    parser.add_argument('--init-method', choices=['column_mean', 'kmeans'], default='column_mean',
+                       help='Matrix initialization method: column_mean (randomized by column mean) or kmeans (k-means clustering) (default: column_mean)')
+    
+    init_norm_group = parser.add_mutually_exclusive_group()
+    init_norm_group.add_argument('--init-norm', dest='init_norm', action='store_true',
+                           help='Whiten (normalize) data before kmeans initialization (default when using kmeans)')
+    init_norm_group.add_argument('--no-init-norm', dest='init_norm', action='store_false',
+                           help='Disable whitening before kmeans initialization')
+    parser.set_defaults(init_norm=True)
+    
+    parser.add_argument('--hold-h', action='store_true', default=False,
+                       help='Hold the H (profile) matrix constant during training. Use with --delay-h to hold for N iterations then release.')
+    parser.add_argument('--delay-h', type=int, default=-1,
+                       help='Iterations to delay H matrix updates. When >0 and combined with --hold-h, holds H for N iterations then releases. (default: -1, disabled)')
+    
     args = parser.parse_args()
     
     # Handle detailed help request
@@ -6114,7 +6230,13 @@ def main():
             scale_units=args.scale_units,
             seed=args.seed,
             robust_fit=args.robust_fit,
-            robust_alpha=args.robust_alpha
+            robust_alpha=args.robust_alpha,
+            # ESAT algorithm and initialization controls
+            method=args.method,
+            init_method=args.init_method,
+            init_norm=args.init_norm,
+            hold_h=args.hold_h,
+            delay_h=args.delay_h
         )
         
         # Override default parameters if specified
