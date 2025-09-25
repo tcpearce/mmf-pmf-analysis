@@ -684,7 +684,7 @@ python pmf_source_app.py MMF9 --hold-h --delay-h 100 --method ls-nmf
 
 **Next Steps**: Ready for testing with challenging datasets showing large species magnitude differences to validate the effectiveness of the new algorithm controls.
 
-**Git Commit**: [To be added after commit]
+**Git Commit**: [c801f78](https://github.com/user/repo/commit/c801f78)
 
 ## 2025-09-25 16:27 - 🔧 UPDATED: EPA Uncertainty Values with Beth's Instrument Specifications
 
