@@ -833,3 +833,5 @@ for model_idx in range(self.models):
 ```bash
 python pmf_source_app.py MMF9 --start-date 2023-10-01 --end-date 2023-10-30 --models 5 --factors 7 --uncertainty-mode epa --snr-enable --robust-fit
 ```
+
+**Git Commit**: [553c8bb](https://github.com/user/repo/commit/553c8bbc80e3011b709a6efa4292728fa565bad3)
