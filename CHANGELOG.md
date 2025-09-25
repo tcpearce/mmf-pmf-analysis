@@ -1105,7 +1105,7 @@ python pmf_source_app.py MMF9 --start-date 2023-10-01 --end-date 2023-10-30 --ou
 
 **Ready for**: Production PMF analysis runs with full feature set enabled.
 
-**Git Commit**: [To be added after commit]
+**Git Commit**: [a1869c9](https://github.com/tcpearce/mmf-pmf-analysis/commit/a1869c9)
 
 ## 2025-09-21 18:10 - Uncertainty Scaling Verification Complete ✅
 
