@@ -1,0 +1,13 @@
+scenario,k,ok,Qtrue,Qrobust,Q_total,Q_ch4,Q_share_ch4,U_min_ch4,U_med_ch4,U_max_ch4,W_max_abs_corr_off,W_mean_abs_corr_off,H_max_abs_corr_off,H_mean_abs_corr_off,H_max_abs_corr_off_no_species,H_mean_abs_corr_off_no_species,eff_rank_V,eff_rank_V_no_species,n_factors,output_dir,prefix,reason
+exclude,,True,110387.52295413743,96060.01514986635,110387.5229541375,,,,,,0.527642024261006,0.17950996804580258,0.7199393195037425,0.27584335871031956,,,8.0,8.0,4.0,ch4_weight_convergence_test_fix\exclude_species,MMF9_mmf_20240101_20240131,
+1.0,1.0,True,126423.11109491634,121087.3960236147,126423.11109491627,14131.849238253682,0.11178216637655544,137.24968896846113,152.02779318449052,7575.858117306795,0.3572688735481749,0.23681045027954065,0.9999851580583698,0.9398574385780191,0.7305883418524257,0.2932100051592312,1.0,8.0,4.0,ch4_weight_convergence_test_fix\k_1,MMF9_mmf_20240101_20240131,
+2.0,2.0,False,,,,,,,,,,,,,,,,,,,,PMF run failed or best_model is None
+3.0,3.0,False,,,,,,,,,,,,,,,,,,,,PMF run failed or best_model is None
+5.0,5.0,False,,,,,,,,,,,,,,,,,,,,PMF run failed or best_model is None
+8.0,8.0,False,,,,,,,,,,,,,,,,,,,,PMF run failed or best_model is None
+10.0,10.0,False,,,,,,,,,,,,,,,,,,,,PMF run failed or best_model is None
+15.0,15.0,False,,,,,,,,,,,,,,,,,,,,PMF run failed or best_model is None
+20.0,20.0,False,,,,,,,,,,,,,,,,,,,,PMF run failed or best_model is None
+30.0,30.0,False,,,,,,,,,,,,,,,,,,,,PMF run failed or best_model is None
+50.0,50.0,False,,,,,,,,,,,,,,,,,,,,PMF run failed or best_model is None
+100.0,100.0,False,,,,,,,,,,,,,,,,,,,,PMF run failed or best_model is None

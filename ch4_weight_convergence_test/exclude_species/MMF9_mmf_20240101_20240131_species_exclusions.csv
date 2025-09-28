@@ -1,0 +1,2 @@
+species,was_present,excluded,reason
+CH4,True,True,CLI exclusion flag

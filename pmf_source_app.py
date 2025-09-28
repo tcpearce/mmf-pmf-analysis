@@ -851,6 +851,184 @@ class MMFPMFAnalyzer:
         
         return data_term + reg_term
     
+    def _train_with_regularization(self, sa_model, V, U, species_names):
+        """Execute staged training loop with regularization proximal updates.
+        
+        This implements the core regularization algorithm:
+        1. Train ESAT model for reg_iter_per_burst iterations
+        2. Extract W, H matrices  
+        3. Apply proximal updates to regulated species columns in H
+        4. Re-initialize ESAT with updated H, W matrices
+        5. Repeat until convergence or max bursts reached
+        
+        Args:
+            sa_model: ESAT SA model instance
+            V (np.ndarray): Concentration matrix (n_samples, n_species)
+            U (np.ndarray): Uncertainty matrix (n_samples, n_species) 
+            species_names (list): Species names matching V columns
+            
+        Returns:
+            bool: True if training completed successfully
+            
+        This method forces single SA mode and Python update path as planned.
+        """
+        import numpy as np
+        
+        if not self._reg_enabled or not self._reg_plan:
+            raise RuntimeError("Cannot run regularized training: regularization not enabled or prepared")
+            
+        print(f"🔄 Starting staged regularization training: {self.reg_bursts} bursts, {self.reg_iter_per_burst} iter/burst")
+        print(f"   Regularizing {len(self._reg_plan)} species: {[item['species'] for item in self._reg_plan]}")
+        print(f"   Convergence tolerance: {self.reg_tol}")
+        
+        # Storage for burst diagnostics
+        burst_diagnostics = []
+        
+        # Main staged training loop
+        for burst_idx in range(self.reg_bursts):
+            print(f"\n🏃 Burst {burst_idx + 1}/{self.reg_bursts}:")
+            
+            # Step 1: Train ESAT model for one burst
+            print(f"   📚 Training ESAT for {self.reg_iter_per_burst} iterations...")
+            try:
+                sa_model.train(
+                    max_iter=self.reg_iter_per_burst,
+                    robust_mode=self.robust_fit, 
+                    robust_alpha=self.robust_alpha
+                )
+                print(f"   ✓ ESAT training completed")
+            except Exception as e:
+                print(f"   ❌ ESAT training failed: {e}")
+                return False
+            
+            # Step 2: Extract current W, H matrices
+            try:
+                W = sa_model.W.astype(np.float64)
+                H = sa_model.H.astype(np.float64) 
+                
+                print(f"   📈 Extracted matrices: W{W.shape}, H{H.shape}")
+                
+                # Validate matrix shapes
+                if W.shape != (V.shape[0], self.factors):
+                    raise ValueError(f"W shape mismatch: expected ({V.shape[0]}, {self.factors}), got {W.shape}")
+                if H.shape != (self.factors, V.shape[1]):
+                    raise ValueError(f"H shape mismatch: expected ({self.factors}, {V.shape[1]}), got {H.shape}")
+                    
+            except Exception as e:
+                print(f"   ❌ Matrix extraction failed: {e}")
+                return False
+            
+            # Step 3: Apply proximal updates to regulated species
+            max_rel_change = 0.0
+            burst_species_changes = []
+            
+            print(f"   🎯 Applying proximal updates to {len(self._reg_plan)} regulated species...")
+            
+            for reg_item in self._reg_plan:
+                species = reg_item['species']
+                col_idx = reg_item['col_idx']
+                lambda_val = reg_item['lambda']
+                h0 = reg_item['h0']
+                
+                # Extract current H column for this species
+                h_current = H[:, col_idx].copy()
+                
+                # Extract V, U columns for this species
+                V_col = V[:, col_idx]
+                U_col = U[:, col_idx]
+                
+                # Apply proximal update
+                try:
+                    h_updated = self._ridge_proximal_update(
+                        W, V_col, U_col, h_current, lambda_val, h0, species
+                    )
+                    
+                    # Compute relative change
+                    change_norm = np.linalg.norm(h_updated - h_current)
+                    rel_change = change_norm / (np.linalg.norm(h_current) + 1e-12)
+                    
+                    # Update H matrix
+                    H[:, col_idx] = h_updated
+                    
+                    # Track changes
+                    max_rel_change = max(max_rel_change, rel_change)
+                    burst_species_changes.append({
+                        'species': species,
+                        'col_idx': col_idx,
+                        'lambda': lambda_val,
+                        'change_norm': change_norm,
+                        'rel_change': rel_change,
+                        'h_norm': np.linalg.norm(h_updated),
+                        'h_to_template_dist': np.linalg.norm(h_updated - h0)
+                    })
+                    
+                    print(f"     ✓ {species}: rel_change={rel_change:.3e}, ||h||={np.linalg.norm(h_updated):.3e}")
+                    
+                except Exception as e:
+                    print(f"     ❌ {species}: Proximal update failed: {e}")
+                    # Continue with other species
+                    continue
+            
+            # Step 4: Re-initialize ESAT with updated matrices
+            print(f"   🔄 Re-initializing ESAT with updated H matrix...")
+            try:
+                # Use ESAT's public initialize method with updated H, W
+                sa_model.initialize(
+                    H=H.astype(np.float64),
+                    W=W.astype(np.float64), 
+                    init_method='column_mean',  # Ensure ESAT doesn't override
+                    init_norm=self.init_norm
+                )
+                
+                # Force Python update path to avoid dtype issues
+                sa_model.optimized = False
+                
+                # Verify matrices were set correctly
+                H_check = sa_model.H.astype(np.float64)
+                W_check = sa_model.W.astype(np.float64)
+                
+                h_diff = np.max(np.abs(H_check - H))
+                w_diff = np.max(np.abs(W_check - W))
+                
+                if h_diff > 1e-10 or w_diff > 1e-10:
+                    print(f"   ⚠️ Warning: Matrix roundtrip error - H diff: {h_diff:.2e}, W diff: {w_diff:.2e}")
+                else:
+                    print(f"   ✓ Matrix re-initialization successful")
+                    
+            except Exception as e:
+                print(f"   ❌ ESAT re-initialization failed: {e}")
+                return False
+            
+            # Step 5: Record burst diagnostics
+            burst_diag = {
+                'burst': burst_idx + 1,
+                'max_rel_change': max_rel_change,
+                'n_species_updated': len(burst_species_changes),
+                'Qtrue': float(getattr(sa_model, 'Qtrue', np.nan)),
+                'Qrobust': float(getattr(sa_model, 'Qrobust', np.nan)),
+                'species_changes': burst_species_changes
+            }
+            burst_diagnostics.append(burst_diag)
+            
+            print(f"   📉 Burst {burst_idx + 1} summary: max_rel_change={max_rel_change:.3e}, Qtrue={burst_diag['Qtrue']:.3f}")
+            
+            # Step 6: Check convergence
+            if max_rel_change < self.reg_tol:
+                print(f"   ✅ Regularization converged in burst {burst_idx + 1}: max_rel_change={max_rel_change:.3e} < tol={self.reg_tol}")
+                break
+            else:
+                print(f"   ➡️ Continuing: max_rel_change={max_rel_change:.3e} > tol={self.reg_tol}")
+        
+        # Store diagnostics for later saving
+        self._reg_burst_diagnostics = burst_diagnostics
+        
+        print(f"\n🏁 Staged regularization training completed:")
+        print(f"   Total bursts: {len(burst_diagnostics)}")
+        print(f"   Final max_rel_change: {max_rel_change:.3e}")
+        print(f"   Converged: {'Yes' if max_rel_change < self.reg_tol else 'No'}")
+        
+        return True
+    
     def _create_filename_prefix(self):
         """Create standardized filename prefix with dates and identifier."""
         # Format dates for filename (replace invalid characters)
@@ -1879,9 +2057,26 @@ class MMFPMFAnalyzer:
         # Optimize number of factors (EPA recommendation: try multiple values)
         self._optimize_factors(V, U)
         
-        # Check if robust mode is requested or weight-aware init is enabled - force single SA if needed
+        # Prepare regularization after factors are determined
+        if self._reg_enabled:
+            try:
+                n_reg_targets = self._prepare_regularization()
+                if n_reg_targets == 0:
+                    print("⚠️ Regularization disabled: no valid targets found")
+                    self._reg_enabled = False
+                else:
+                    print(f"✅ Regularization preparation complete: {n_reg_targets} targets mapped")
+            except Exception as e:
+                print(f"❌ Regularization preparation failed: {e}")
+                print("   Disabling regularization and continuing with standard PMF")
+                self._reg_enabled = False
+        
+        # Check if regularization, robust mode, or weight-aware init is enabled - force single SA if needed
         use_batch_sa = USE_BATCH_SA
-        if self.robust_fit and USE_BATCH_SA:
+        if self._reg_enabled and USE_BATCH_SA:
+            print("⛓️ Regularization enabled: forcing single SA mode (BatchSA doesn't support proximal updates)")
+            use_batch_sa = False
+        elif self.robust_fit and USE_BATCH_SA:
             print("⚠️  Robust mode requested: forcing single SA mode (BatchSA doesn't support robust training)")
             use_batch_sa = False
         elif self.weight_aware_init and self.species_weight_dict and USE_BATCH_SA:
@@ -1925,52 +2120,82 @@ class MMFPMFAnalyzer:
                 )
                 self._display_q_interpretation(interpretation)
             else:
-                # Use multiple SA models (manual implementation for robust mode)
-                if self.robust_fit:
+                # Use single SA model (manual implementation for regularization, robust mode, or weight-aware init)
+                if self._reg_enabled:
+                    print(f"⛓️ Running regularized PMF training with staged proximal updates")
+                    print(f"   → Regularizing {len(self._reg_plan)} species over {self.reg_bursts} bursts")
+                elif self.robust_fit:
                     print(f"🔧 Running {self.models} SA models with ROBUST mode (alpha={self.robust_alpha})")
-                    print("   → Robust training will downweight outliers during optimization")
+                    print("   → Robust training will downweight outliers during optimization")
                 elif self.weight_aware_init and self.species_weight_dict:
                     print(f"🎯 Running {self.models} SA models with WEIGHT-AWARE initialization")
-                    print("   → Custom initialization accounts for species uncertainty weights")
+                    print("   → Custom initialization accounts for species uncertainty weights")
                 else:
                     print(f"⚠️ Running {self.models} SA models (BatchSA not available or disabled)")
                 
-                # Run multiple SA models and select the best one (keep only best to save memory)
-                best_model = None
-                best_q_robust = float('inf')
-                best_idx = 0
-                
-                for model_idx in range(self.models):
-                    print(f"   🔄 Training model {model_idx + 1}/{self.models}...")
+                if self._reg_enabled:
+                    # Regularized training: single model with staged proximal updates
+                    print(f"   🚀 Creating SA model for regularized training...")
                     
-                    # Create SA model with different seed for each run
-                    model_seed = self.seed + model_idx if self.seed else None
                     sa_model = SA(
                         V=V, U=U, 
                         factors=self.factors,
-                        method=self.method,  # Use configured method (ls-nmf or ws-nmf)
-                        seed=model_seed,
-                        verbose=False  # Reduce verbosity for multiple models
+                        method=self.method,
+                        seed=self.seed,
+                        verbose=True  # More verbose for regularized runs
                     )
                     
-                    # Initialize matrices with weight-aware method if enabled
+                    # Initialize matrices (weight-aware or standard)
                     self._weight_aware_initialize(sa_model, species_names, V, U)
                     
-                    # Train with all configured parameters
-                    sa_model.train(
-                        robust_mode=self.robust_fit, 
-                        robust_alpha=self.robust_alpha
-                    )
+                    # Run staged regularization training
+                    regularization_success = self._train_with_regularization(sa_model, V, U, species_names)
                     
-                    print(f"     Model {model_idx + 1}: Q(true)={sa_model.Qtrue:.2f}, Q(robust)={sa_model.Qrobust:.2f}")
+                    if not regularization_success:
+                        print(f"❌ Regularized training failed")
+                        return False
                     
-                    # Keep only the best model (lowest Q(robust))
-                    if sa_model.Qrobust < best_q_robust:
-                        best_q_robust = sa_model.Qrobust
-                        best_idx = model_idx
-                        # Replace previous best model to save memory
-                        best_model = sa_model
-                    # Discard current model if it's not the best (memory management)
+                    # Use the regularized model as the best model
+                    best_model = sa_model
+                    best_idx = 0
+                    
+                else:
+                    # Run multiple SA models and select the best one (keep only best to save memory)
+                    best_model = None
+                    best_q_robust = float('inf')
+                    best_idx = 0
+                    
+                    for model_idx in range(self.models):
+                        print(f"   🔄 Training model {model_idx + 1}/{self.models}...")
+                        
+                        # Create SA model with different seed for each run
+                        model_seed = self.seed + model_idx if self.seed else None
+                        sa_model = SA(
+                            V=V, U=U, 
+                            factors=self.factors,
+                            method=self.method,  # Use configured method (ls-nmf or ws-nmf)
+                            seed=model_seed,
+                            verbose=False  # Reduce verbosity for multiple models
+                        )
+                        
+                        # Initialize matrices with weight-aware method if enabled
+                        self._weight_aware_initialize(sa_model, species_names, V, U)
+                        
+                        # Train with all configured parameters
+                        sa_model.train(
+                            robust_mode=self.robust_fit, 
+                            robust_alpha=self.robust_alpha
+                        )
+                        
+                        print(f"     Model {model_idx + 1}: Q(true)={sa_model.Qtrue:.2f}, Q(robust)={sa_model.Qrobust:.2f}")
+                        
+                        # Keep only the best model (lowest Q(robust))
+                        if sa_model.Qrobust < best_q_robust:
+                            best_q_robust = sa_model.Qrobust
+                            best_idx = model_idx
+                            # Replace previous best model to save memory
+                            best_model = sa_model
+                        # Discard current model if it's not the best (memory management)
                 
                 # Set best model
                 self.best_model = best_model

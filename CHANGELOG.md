@@ -1439,3 +1439,107 @@ python pmf_source_app.py MMF9 --exclude-species H2S --species-weight CH4=3
 3. Advanced regularization techniques if further improvements needed
 
 **Git Commit**: [561ded9](https://github.com/tcpearce/mmf-pmf-analysis/commit/561ded9)
+
+## 2025-01-26 20:35 - ⛓️ SPECIES REGULARIZATION: Stage 7 Complete - Staged Training Loop Integration
+
+**Status**: **STAGE 7 COMPLETED** - Regularized training loop now fully integrated with PMF analysis pipeline.
+
+### 🎯 Stage 7: Staged Training Loop (train→prox→re-init cycles)
+
+**Implementation**: Complete integration of regularization preparation with PMF analysis workflow:
+
+1. **Regularization Preparation Call**: Added `_prepare_regularization()` call after factor optimization in `run_pmf_analysis()`
+2. **Species-to-Column Mapping**: Regularization targets properly mapped to concentration matrix columns
+3. **Template Building**: Zero/uniform/from-file templates constructed for each regulated species
+4. **Error Handling**: Graceful fallback to standard PMF if regularization preparation fails
+5. **Progress Tracking**: Clear messaging about regularization status and targets
+
+**Integration Flow**:
+```python
+# After factor optimization, before training begins:
+if self._reg_enabled:
+    try:
+        n_reg_targets = self._prepare_regularization()
+        if n_reg_targets == 0:
+            self._reg_enabled = False  # Disable if no valid targets
+        else:
+            print(f"✅ Regularization preparation complete: {n_reg_targets} targets mapped")
+    except Exception as e:
+        print(f"❌ Regularization preparation failed: {e}")
+        self._reg_enabled = False  # Fallback to standard PMF
+```
+
+**Training Flow**: When regularization is enabled:
+1. Force single SA mode (BatchSA doesn't support proximal updates)
+2. Create SA model with regularization-compatible configuration
+3. Apply weight-aware initialization (if enabled)
+4. Execute `_train_with_regularization()` with staged proximal updates
+5. Use regularized model as best result
+
+### 🔧 Technical Integration Points
+
+**Data Preparation Pipeline**:
+1. `load_mmf_data()` - Load parquet data
+2. `prepare_pmf_data()` - Filter, clean, build V/U matrices
+3. `_optimize_factors()` - Determine optimal number of factors
+4. **`_prepare_regularization()`** ← **NEW: Stage 7 addition**
+5. `run_pmf_analysis()` - Execute training (regularized or standard)
+
+**Regularization Requirements Met**:
+- ✅ Species names mapped to column indices with case-insensitive matching
+- ✅ Templates constructed with validation (zero/uniform/from-file)
+- ✅ Regularization plan built and validated before training
+- ✅ Graceful error handling and fallback to standard PMF
+- ✅ Clear user messaging about regularization status
+
+**CLI Integration Complete**:
+- All regularization flags functional: `--reg-species`, `--reg-lambda`, `--reg-template`, etc.
+- Parameter validation and broadcasting working correctly
+- Dashboard will display regularization configuration when active
+- CLI reproducibility section includes regularization parameters
+
+### ✅ Stages 1-7 Implementation Status
+
+**COMPLETED STAGES**:
+- ✅ **Stage 1**: CLI flags and argument parsing - All regularization parameters integrated
+- ✅ **Stage 2**: Parameter validation with broadcasting and error handling
+- ✅ **Stage 3**: Template construction for zero/uniform/from-file types
+- ✅ **Stage 4**: Species indexing with case-insensitive matching
+- ✅ **Stage 5**: Uncertainty weights computation (D = 1/U²) with numerical guards
+- ✅ **Stage 6**: Proximal update method implementing closed-form ridge solution
+- ✅ **Stage 7**: Staged training loop integrating with ESAT API
+
+**REMAINING STAGES** (8-13):
+- ⏳ Stage 8: Mode forcing and compatibility with existing features
+- ⏳ Stage 9: Additional regularization diagnostics
+- ⏳ Stage 10-13: Validation, reproducibility testing, and advanced features
+
+### 🧮 Mathematical Implementation Summary
+
+**Regularized PMF Objective**:
+```
+Baseline: min_{W,H ≥ 0} 1/2 || (V − W H) ⊙ We^{1/2} ||_F^2
+Regularized: Add (λ/2) ||H[:, j*] − h0||_2^2 for target species
+```
+
+**Staged Training Algorithm**:
+1. **Burst Training**: Train PMF model for `reg_iter_per_burst` iterations
+2. **Proximal Update**: Apply ridge regularization to target species columns: `(W^T D W + λ I) h = W^T D v + λ h0`
+3. **Projection**: Ensure non-negativity: `h ← max(h, 0)`
+4. **Repeat**: Continue for `reg_bursts` cycles with convergence checking
+
+**Files Modified**:
+- `pmf_source_app.py` - Added regularization preparation call and integration logic (lines 2060-2072)
+
+### 🎯 Next Steps: Stages 8-13
+
+**Stage 8**: Mode forcing and compatibility testing with robust training, weight-aware init
+**Stage 9**: Enhanced diagnostics and validation metrics
+**Stage 10**: Reproducibility testing with different lambda values
+**Stage 11**: Advanced template options and elastic-net L1 penalty
+**Stage 12**: Performance optimization and memory management
+**Stage 13**: Comprehensive validation suite and documentation
+
+**Ready for Testing**: The regularization system is now ready for end-to-end testing with real PMF data to validate the "push out" behavior for target species like CH4.
+
+**Git Commit**: [To be added after commit]
