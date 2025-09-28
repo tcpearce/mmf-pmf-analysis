@@ -176,7 +176,7 @@ class MMFPMFAnalyzer:
                  snr_bad_threshold=0.2, snr_bdl_weak_frac=0.6, snr_bdl_bad_frac=0.8, snr_missing_weak_frac=0.2,
                  snr_missing_bad_frac=0.4, exclude_bad=True, dashboard_snr_panel=True, write_diagnostics=True,
                  scale_units=True, seed=42, robust_fit=False, robust_alpha=4.0,
-                 method="ls-nmf", init_method="column_mean", init_norm=True, hold_h=False, delay_h=-1):
+                 method="ls-nmf", init_method="column_mean", init_norm=True, hold_h=False, delay_h=-1, species_weight=None):
         """
         Initialize PMF analyzer for MMF data.
         
@@ -214,6 +214,7 @@ class MMFPMFAnalyzer:
             init_norm (bool): Whiten data before kmeans initialization (for magnitude balance)
             hold_h (bool): Hold H (profile) matrix constant during training
             delay_h (int): Hold H matrix for N iterations, then release (-1 = disabled)
+            species_weight (list): List of species uncertainty multipliers (e.g., ['CH4=5', 'H2S=2'])
         """
         self.station = station
         self.data_dir = data_dir
@@ -307,6 +308,66 @@ class MMFPMFAnalyzer:
         if self.delay_h > 0 and not self.hold_h:
             print("⚠️  Warning: delay_h specified without hold_h. Setting hold_h=True for consistency.")
             self.hold_h = True
+        
+        # Species-specific uncertainty weighting
+        self.species_weight_raw = species_weight or []
+        self.species_weight_dict = self._parse_species_weights(self.species_weight_raw)
+    
+    def _parse_species_weights(self, species_weight_list):
+        """Parse species weight specifications into a dictionary.
+        
+        Args:
+            species_weight_list (list): List of weight specifications (e.g., ['CH4=5', 'H2S=2,NO2=3'])
+            
+        Returns:
+            dict: Mapping of species names (case-insensitive) to weight factors
+        """
+        weight_dict = {}
+        
+        if not species_weight_list:
+            return weight_dict
+        
+        for spec in species_weight_list:
+            # Handle comma-separated multiple weights in single spec
+            for item in spec.split(','):
+                item = item.strip()
+                if '=' not in item:
+                    print(f"Warning: Invalid species weight specification '{item}' (missing '='). Skipping.")
+                    continue
+                    
+                parts = item.split('=', 1)  # Split on first '=' only
+                if len(parts) != 2:
+                    print(f"Warning: Invalid species weight specification '{item}'. Skipping.")
+                    continue
+                    
+                species_name = parts[0].strip()
+                weight_str = parts[1].strip()
+                
+                # Validate species name
+                if not species_name:
+                    print(f"Warning: Empty species name in '{item}'. Skipping.")
+                    continue
+                    
+                # Parse weight factor
+                try:
+                    weight_factor = float(weight_str)
+                    if weight_factor <= 0:
+                        print(f"Warning: Weight factor must be > 0 for {species_name} (got {weight_factor}). Skipping.")
+                        continue
+                    if weight_factor > 100:
+                        print(f"Warning: Very large weight factor for {species_name} ({weight_factor}). This may cause numerical instability.")
+                    
+                    # Store with case-insensitive key (convert to uppercase for matching)
+                    key = species_name.upper()
+                    if key in weight_dict:
+                        print(f"Warning: Duplicate species weight for {species_name}. Using latest value: {weight_factor}")
+                    weight_dict[key] = weight_factor
+                    
+                except ValueError:
+                    print(f"Warning: Invalid weight factor '{weight_str}' for {species_name}. Skipping.")
+                    continue
+        
+        return weight_dict
     
     def _create_filename_prefix(self):
         """Create standardized filename prefix with dates and identifier."""
@@ -584,6 +645,10 @@ class MMFPMFAnalyzer:
         elif self.snr_enable and not HAS_SNR_CATEGORIZATION:
             print("⚠️ S/N categorization requested but module not available. Proceeding without categorization.")
         
+        # Apply species-specific uncertainty weighting if specified
+        if self.species_weight_dict:
+            self._apply_species_weighting()
+        
         # Save processed data
         self._save_processed_data()
     
@@ -738,6 +803,79 @@ class MMFPMFAnalyzer:
             print(f"   Bad: {summary['bad_count']} species")
             print(f"   Average S/N: {summary['average_snr']:.3f}")
             print(f"   Thresholds: weak={self.snr_weak_threshold}, bad={self.snr_bad_threshold}")
+    
+    def _apply_species_weighting(self):
+        """
+        Apply species-specific uncertainty multipliers to downweight selected species.
+        
+        This multiplies uncertainties for specified species, which effectively
+        downweights them in the ESAT LS-PMF objective function. Applied after
+        S/N categorization and before saving data for ESAT.
+        """
+        print("🎯 Applying species-specific uncertainty weighting...")
+        
+        # Build mapping of actual column names to weight factors
+        species_weights_applied = {}
+        species_weights_not_found = {}
+        
+        for species_key, weight_factor in self.species_weight_dict.items():
+            # Find matching column name (case-insensitive)
+            matched_column = None
+            for col in self.uncertainty_data.columns:
+                if col.upper() == species_key.upper():
+                    matched_column = col
+                    break
+            
+            if matched_column:
+                # Apply weight factor to uncertainty column
+                original_uncertainty = self.uncertainty_data[matched_column].copy()
+                self.uncertainty_data[matched_column] = original_uncertainty * weight_factor
+                species_weights_applied[matched_column] = weight_factor
+                print(f"   ✅ {matched_column}: Uncertainty multiplied by {weight_factor}")
+            else:
+                species_weights_not_found[species_key] = weight_factor
+                print(f"   ⚠️ {species_key}: Species not found in data (skipped)")
+        
+        # Store results for provenance tracking
+        self._species_weights_applied = species_weights_applied
+        self._species_weights_not_found = species_weights_not_found
+        
+        # Summary
+        if species_weights_applied:
+            print(f"   📊 Applied weights to {len(species_weights_applied)} species")
+        if species_weights_not_found:
+            print(f"   ⚠️ {len(species_weights_not_found)} requested species not found in data")
+        
+        # Write species weights CSV for provenance
+        self._save_species_weights_csv()
+    
+    def _save_species_weights_csv(self):
+        """Save species weight application results to CSV for provenance."""
+        species_weights_data = []
+        
+        # Add applied weights
+        for species, weight in getattr(self, '_species_weights_applied', {}).items():
+            species_weights_data.append({
+                'species': species,
+                'multiplier': weight,
+                'was_present': True,
+                'applied': True
+            })
+        
+        # Add not found species
+        for species, weight in getattr(self, '_species_weights_not_found', {}).items():
+            species_weights_data.append({
+                'species': species,
+                'multiplier': weight,
+                'was_present': False,
+                'applied': False
+            })
+        
+        if species_weights_data:
+            weights_df = pd.DataFrame(species_weights_data)
+            weights_file = self.output_dir / f"{self.filename_prefix}_species_weights.csv"
+            weights_df.to_csv(weights_file, index=False)
+            print(f"   💾 Species weights saved: {weights_file.name}")
     
     def _generate_uncertainty_matrix(self, pollutant_columns):
         """
@@ -1804,6 +1942,12 @@ class MMFPMFAnalyzer:
         except Exception as e:
             print(f"   ❌ Error creating PCA comparison plots: {e}")
         
+        # Generate factor structure diagnostics summary
+        try:
+            self._generate_factor_structure_summary()
+        except Exception as e:
+            print(f"   ⚠️ Error generating factor structure summary: {e}")
+        
         # Create summary dashboard HTML
         self._create_html_dashboard(plot_files)
         
@@ -2085,6 +2229,11 @@ class MMFPMFAnalyzer:
         if not cli_params['init_norm']:
             cmd_parts.append('--no-init-norm')
         
+        # Add species weighting parameters
+        if hasattr(self, '_species_weights_applied') and self._species_weights_applied:
+            for species, weight in self._species_weights_applied.items():
+                cmd_parts.append(f'--species-weight {species}={weight}')
+        
         # Add other non-default parameters
         non_defaults = {
 'uncertainty_epsilon': (1e-12, cli_params['uncertainty_epsilon']),
@@ -2131,6 +2280,11 @@ class MMFPMFAnalyzer:
             'seed': (cli_params["seed"], 'Random seed for reproducibility'),
             'write_diagnostics': (cli_params["write_diagnostics"], 'Write diagnostic CSV files'),
         }
+        
+        # Add species weighting if any applied
+        if hasattr(self, '_species_weights_applied') and self._species_weights_applied:
+            for species, weight in self._species_weights_applied.items():
+                param_info[f'species_weight_{species}'] = (weight, f'Uncertainty multiplier for {species}')
         
         for param, (value, description) in param_info.items():
             html_section += f"""
@@ -2292,6 +2446,32 @@ class MMFPMFAnalyzer:
                 html_content += "</table>"
             
             html_content += "</div>"
+        
+        # Add species weighting section if any weights were applied
+        if hasattr(self, '_species_weights_applied') and self._species_weights_applied:
+            html_content += f"""
+            <div class="epa-section">
+                <h2>⚖️ Species Uncertainty Weighting</h2>
+                <p>The following species had their uncertainties multiplied to downweight them in the PMF objective function:</p>
+                <table>
+                    <tr><th>Species</th><th>Uncertainty Multiplier</th><th>Effect</th></tr>
+            """
+            
+            for species, weight in sorted(self._species_weights_applied.items()):
+                effect = f"Downweighted {weight}× (less influence on factors)"
+                html_content += f"""
+                    <tr>
+                        <td><strong>{species}</strong></td>
+                        <td>{weight}</td>
+                        <td>{effect}</td>
+                    </tr>
+                """
+            
+            html_content += """
+                </table>
+                <p><small><em>Note: Uncertainty multiplication reduces species influence in ESAT LS-PMF optimization without changing concentrations.</em></small></p>
+            </div>
+            """
         
         html_content += """
             <div class="summary">
@@ -3590,6 +3770,120 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         plt.close()
         plot_files.append(plot_path)
         print(f"   ✅ Saved: detailed_profile_comparison.png")
+    
+    def _generate_factor_structure_summary(self):
+        """Generate factor structure diagnostics for model validation.
+        
+        Creates a summary file with sparsity metrics, W/H correlations,
+        and other structural diagnostics useful for comparing PMF runs.
+        """
+        if not self.best_model:
+            return
+        
+        print("📊 Generating factor structure diagnostics...")
+        
+        # Get factor profiles (H) and contributions (W)
+        F_profiles = self.best_model.F.T  # Transpose to get (n_factors, n_species)
+        G_contributions = self.best_model.G  # (n_samples, n_factors)
+        
+        # Calculate sparsity metrics
+        def calculate_sparsity(matrix, threshold=0.01):
+            """Calculate sparsity as fraction of elements below threshold."""
+            return np.mean(np.abs(matrix) < threshold)
+        
+        def calculate_gini_coefficient(array):
+            """Calculate Gini coefficient as sparsity measure."""
+            array = np.abs(array).flatten()
+            array = array[array > 0]  # Remove zeros
+            if len(array) == 0:
+                return 0.0
+            array = np.sort(array)
+            n = len(array)
+            index = np.arange(1, n + 1)
+            return (2 * np.sum(index * array)) / (n * np.sum(array)) - (n + 1) / n
+        
+        # W (contributions) sparsity analysis
+        w_sparsity_01 = calculate_sparsity(G_contributions, 0.01)
+        w_sparsity_05 = calculate_sparsity(G_contributions, 0.05)
+        w_gini = np.mean([calculate_gini_coefficient(G_contributions[:, i]) for i in range(self.factors)])
+        
+        # H (profiles) sparsity analysis
+        h_sparsity_01 = calculate_sparsity(F_profiles, 0.01)
+        h_sparsity_05 = calculate_sparsity(F_profiles, 0.05)
+        h_gini = np.mean([calculate_gini_coefficient(F_profiles[i, :]) for i in range(self.factors)])
+        
+        # W correlation matrix (factor time series correlations)
+        w_corr_matrix = np.corrcoef(G_contributions.T)
+        w_max_off_diagonal = np.max(np.abs(w_corr_matrix[np.triu_indices_from(w_corr_matrix, k=1)]))
+        w_mean_off_diagonal = np.mean(np.abs(w_corr_matrix[np.triu_indices_from(w_corr_matrix, k=1)]))
+        
+        # H correlation matrix (factor profile correlations)
+        h_corr_matrix = np.corrcoef(F_profiles)
+        h_max_off_diagonal = np.max(np.abs(h_corr_matrix[np.triu_indices_from(h_corr_matrix, k=1)]))
+        h_mean_off_diagonal = np.mean(np.abs(h_corr_matrix[np.triu_indices_from(h_corr_matrix, k=1)]))
+        
+        # Individual factor diagnostics
+        factor_diagnostics = []
+        for i in range(self.factors):
+            factor_diag = {
+                'factor_id': i + 1,
+                'w_variance': np.var(G_contributions[:, i]),
+                'w_mean': np.mean(G_contributions[:, i]),
+                'w_sparsity_01': calculate_sparsity(G_contributions[:, i], 0.01),
+                'h_sparsity_01': calculate_sparsity(F_profiles[i, :], 0.01),
+                'h_dominant_species': self.concentration_data.columns[np.argmax(F_profiles[i, :])],
+                'h_max_loading': np.max(F_profiles[i, :]),
+                'h_gini': calculate_gini_coefficient(F_profiles[i, :])
+            }
+            factor_diagnostics.append(factor_diag)
+        
+        # Save structured diagnostics to file
+        summary_file = self.output_dir / f"{self.filename_prefix}_factor_structure_summary.txt"
+        
+        with open(summary_file, 'w', encoding='utf-8') as f:
+            f.write(f"Factor Structure Diagnostics Summary\n")
+            f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"=" * 50 + "\n\n")
+            
+            f.write(f"Model Information:\n")
+            f.write(f"  Factors: {self.factors}\n")
+            f.write(f"  Species: {len(self.concentration_data.columns)}\n")
+            f.write(f"  Samples: {len(self.concentration_data)}\n")
+            f.write(f"  Q(true): {self.best_model.Qtrue:.2f}\n")
+            f.write(f"  Q(robust): {self.best_model.Qrobust:.2f}\n\n")
+            
+            f.write(f"Sparsity Metrics:\n")
+            f.write(f"  W Matrix (Contributions):\n")
+            f.write(f"    Sparsity (< 1%): {w_sparsity_01:.3f}\n")
+            f.write(f"    Sparsity (< 5%): {w_sparsity_05:.3f}\n")
+            f.write(f"    Mean Gini: {w_gini:.3f}\n")
+            
+            f.write(f"  H Matrix (Profiles):\n")
+            f.write(f"    Sparsity (< 1%): {h_sparsity_01:.3f}\n")
+            f.write(f"    Sparsity (< 5%): {h_sparsity_05:.3f}\n")
+            f.write(f"    Mean Gini: {h_gini:.3f}\n\n")
+            
+            f.write(f"Correlation Analysis:\n")
+            f.write(f"  W Correlations (Time Series):\n")
+            f.write(f"    Max Off-Diagonal: {w_max_off_diagonal:.3f}\n")
+            f.write(f"    Mean Off-Diagonal: {w_mean_off_diagonal:.3f}\n")
+            
+            f.write(f"  H Correlations (Profiles):\n")
+            f.write(f"    Max Off-Diagonal: {h_max_off_diagonal:.3f}\n")
+            f.write(f"    Mean Off-Diagonal: {h_mean_off_diagonal:.3f}\n\n")
+            
+            f.write(f"Individual Factor Diagnostics:\n")
+            for factor in factor_diagnostics:
+                f.write(f"  Factor {factor['factor_id']}:\n")
+                f.write(f"    W Variance: {factor['w_variance']:.3f}\n")
+                f.write(f"    W Mean: {factor['w_mean']:.3f}\n")
+                f.write(f"    W Sparsity: {factor['w_sparsity_01']:.3f}\n")
+                f.write(f"    H Sparsity: {factor['h_sparsity_01']:.3f}\n")
+                f.write(f"    Dominant Species: {factor['h_dominant_species']}\n")
+                f.write(f"    Max H Loading: {factor['h_max_loading']:.3f}\n")
+                f.write(f"    H Gini: {factor['h_gini']:.3f}\n")
+        
+        print(f"   💾 Factor structure summary: {summary_file.name}")
     
     def _create_wind_analysis_plots(self, dashboard_dir, plot_files, G_contributions):
         """
@@ -6024,6 +6318,24 @@ def show_detailed_help():
   --seed N              Random seed for reproducible results
                         Default: 42, ensures consistent PMF solutions
 
+[WEIGHTING] SPECIES-SPECIFIC UNCERTAINTY WEIGHTING:
+  --species-weight      Multiply uncertainties for specific species to downweight them in PMF
+                        Format: SPECIES=FACTOR (e.g., CH4=5 or CH4=5,H2S=2)
+                        Can be used multiple times: --species-weight CH4=5 --species-weight H2S=2
+                        Applied AFTER S/N categorization but BEFORE saving uncertainties for ESAT
+                        Higher multipliers = lower influence in factor optimization
+                        
+                        Examples:
+                        --species-weight CH4=5          # Downweight CH4 by 5x
+                        --species-weight CH4=5,H2S=2    # Multiple in one flag
+                        --species-weight CH4=10         # Strong downweighting
+                        
+                        Effects on PMF:
+                        - Increases uncertainty → reduces species weight in LS objective
+                        - Does NOT change concentration values
+                        - Helps address extreme dynamic range differences
+                        - Preserves PMF additive assumptions (unlike log-transform)
+
 [HELP] HELP:
   --help-detail         Show this detailed help (you're reading it now!)
   -h, --help            Show standard help summary
@@ -6045,6 +6357,9 @@ python pmf_source_app.py MMF2 --models 50 --max-workers 4 --create-pdf --run-pca
 
 # Robust PMF training to downweight outliers (auto-switches to single SA mode):
 python pmf_source_app.py MMF9 --robust-fit --robust-alpha 3.0 --factors 5
+
+# Species weighting to handle extreme concentration ranges (e.g., CH4 >> other species):
+python pmf_source_app.py MMF9 --species-weight CH4=5 --species-weight H2S=2 --uncertainty-mode epa
 
 =============================================================================
     """
@@ -6152,6 +6467,10 @@ def main():
     parser.add_argument('--seed', type=int, default=42,
                        help='Random seed for reproducibility (default: 42)')
     
+    # Species-specific uncertainty weighting
+    parser.add_argument('--species-weight', action='append', default=[],
+                       help='Multiply uncertainties for specific species (e.g., --species-weight CH4=5 or --species-weight CH4=5,H2S=2). Applied after S/N adjustments. Can be used multiple times.')
+    
     # ESAT Algorithm and Initialization Controls
     parser.add_argument('--method', choices=['ls-nmf', 'ws-nmf'], default='ls-nmf',
                        help='ESAT NMF method: ls-nmf (nonnegative, standard PMF) or ws-nmf (semi-NMF, allows negative W contributions) (default: ls-nmf)')
@@ -6230,7 +6549,9 @@ def main():
             init_method=args.init_method,
             init_norm=args.init_norm,
             hold_h=args.hold_h,
-            delay_h=args.delay_h
+            delay_h=args.delay_h,
+            # Species-specific uncertainty weighting
+            species_weight=args.species_weight
         )
         
         # Override default parameters if specified

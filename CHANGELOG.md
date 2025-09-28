@@ -1136,3 +1136,80 @@ python pmf_source_app.py MMF9 --start-date 2023-10-01 --end-date 2023-10-30 --ou
 - PMF model quality: Q/DOF = 0.388 (Excellent) benefiting from enhanced uncertainty weighting
 
 **Impact**: Confirmed that temporal averaging provides substantial sensitivity improvements (29-59% uncertainty reduction) that properly propagate through the entire PMF analysis pipeline, enhancing model reliability and scientific validity.
+
+## 2025-09-28 12:55 - 🎯 FEATURE: Species-Specific Uncertainty Weighting for Dynamic Range Control
+
+**Status**: **COMPLETED** - Comprehensive implementation of species-specific uncertainty multipliers to address extreme concentration differences without violating PMF assumptions.
+
+### 🎯 New Feature: --species-weight CLI Flag
+
+**Purpose**: Address extreme dynamic range disparities (e.g., CH4 being 3 orders of magnitude larger than other species) by selectively downweighting problematic species through uncertainty multiplication.
+
+**Key Advantages over Log-Transform Approach**:
+- ✅ Preserves PMF additive mass-mixing assumptions
+- ✅ No concentration value changes (only uncertainty scaling)
+- ✅ Compatible with existing EPA S/N categorization
+- ✅ Maintains interpretable linear-domain results
+- ✅ Full provenance tracking and reproducibility
+
+### 🛠️ Implementation Details
+
+**CLI Usage**:
+```bash
+# Single species weighting
+python pmf_source_app.py MMF9 --species-weight CH4=5
+
+# Multiple species with separate flags
+python pmf_source_app.py MMF9 --species-weight CH4=5 --species-weight H2S=2
+
+# Multiple species in single flag (comma-separated)
+python pmf_source_app.py MMF9 --species-weight CH4=5,H2S=2,NO2=1.5
+```
+
+**Pipeline Integration**:
+1. **Location**: Applied after EPA/legacy uncertainty calculation and S/N categorization, before saving U matrices
+2. **Mechanism**: Multiplies uncertainty values: `U_new = U_original × weight_factor`
+3. **Effect**: Higher uncertainties → lower species influence in ESAT LS-PMF objective function
+4. **Validation**: Case-insensitive species matching with warnings for non-existent species
+
+**Features Added**:
+- **CLI Argument Parsing**: `--species-weight` with comprehensive validation
+- **Uncertainty Application Logic**: `_apply_species_weighting()` method
+- **Dashboard Integration**: Configuration panel and CLI reproducibility sections
+- **Factor Structure Diagnostics**: `_generate_factor_structure_summary()` method
+- **Provenance Tracking**: `*_species_weights.csv` and `*_factor_structure_summary.txt`
+
+### 🧪 Testing and Validation
+
+**Unit Tests** (`test_species_weighting.py`):
+- CLI parsing validation (single/multiple species, comma-separated, case-insensitive)
+- Uncertainty application correctness and error handling
+
+**Integration Tests** (`test_species_weighting_cli.py`):
+- End-to-end CLI workflow with synthetic data
+- Species weights CSV creation and uncertainty matrix scaling verification
+
+### 🎯 Impact and Use Cases
+
+**Primary Use Case**: CH4 dynamic range control
+- **Problem**: CH4 concentrations 3 orders of magnitude larger than other species
+- **Solution**: `--species-weight CH4=5` reduces CH4 influence by 5× through uncertainty inflation
+- **Result**: Better factor separation without losing mass additivity
+
+**Mathematical Foundation**:
+- Leverages ESAT LS-PMF uncertainty weighting: minimize ||D_ij - GF||² / U_ij²
+- Larger U_ij → smaller weight in objective → reduced species influence
+- Preserves non-negative matrix factorization assumptions
+
+### 🔧 Files Modified/Added
+
+**Core Implementation**:
+- `pmf_source_app.py`: CLI parsing, pipeline integration, dashboard updates
+
+**Testing**:
+- `test_species_weighting.py`: Unit tests for parsing and application
+- `test_species_weighting_cli.py`: Integration tests with synthetic data
+
+**Next Steps**: Test with October MMF9 data (baseline vs CH4=5 weighted comparison)
+
+**Git Commit**: [229286a](https://github.com/tcpearce/mmf-pmf-analysis/commit/229286a)
