@@ -40,7 +40,7 @@ except ImportError:
 HAS_WEASYPRINT = False
 
 if not (HAS_PDFKIT or HAS_WEASYPRINT):
-    print("ℹ️  PDF conversion will use Chrome/Edge headless (no additional libraries needed)")
+    print("[INFO]  PDF conversion will use Chrome/Edge headless (no additional libraries needed)")
 
 # PCA analysis imports
 from sklearn.preprocessing import StandardScaler
@@ -208,7 +208,7 @@ class MMFPMFAnalyzer:
             exclude_bad (bool): Exclude bad features from PMF analysis
             dashboard_snr_panel (bool): Add S/N panels to dashboard
             write_diagnostics (bool): Write diagnostic CSVs
-            scale_units (bool): Apply unit standardization (mg/m³→μg/m³, ng/m³→μg/m³)
+            scale_units (bool): Apply unit standardization (mg/m3->ug/m3, ng/m3->ug/m3)
             seed (int): Random seed for reproducibility
             robust_fit (bool): Enable ESAT robust loss during SA training (single-model fallback)
             robust_alpha (float): Robust cutoff alpha for uncertainty-scaled residuals
@@ -319,7 +319,7 @@ class MMFPMFAnalyzer:
         
         # Validate parameter combinations
         if self.delay_h > 0 and not self.hold_h:
-            print("⚠️  Warning: delay_h specified without hold_h. Setting hold_h=True for consistency.")
+            print("[WARN]  Warning: delay_h specified without hold_h. Setting hold_h=True for consistency.")
             self.hold_h = True
         
         # Species-specific uncertainty weighting
@@ -337,9 +337,9 @@ class MMFPMFAnalyzer:
             self.weight_aware_init = bool(weight_aware_init)
         
         if self.weight_aware_init and not self.species_weight_dict:
-            print("⚠️ Warning: Weight-aware initialization enabled but no species weights specified")
+            print("[WARN] Warning: Weight-aware initialization enabled but no species weights specified")
         elif self.weight_aware_init:
-            print(f"🎯 Weight-aware initialization enabled for {len(self.species_weight_dict)} weighted species")
+            print(f"[INIT] Weight-aware initialization enabled for {len(self.species_weight_dict)} weighted species")
         
         # Species regularization control
         self.reg_species_raw = reg_species or []
@@ -444,7 +444,7 @@ class MMFPMFAnalyzer:
                     print(f"Warning: Duplicate species exclusion for {species_name}. Ignoring duplicate.")
                 else:
                     exclude_set.add(key)
-                    print(f"✅ Species scheduled for exclusion: {species_name}")
+                    print(f"[OK] Species scheduled for exclusion: {species_name}")
         
         return exclude_set
     
@@ -470,7 +470,7 @@ class MMFPMFAnalyzer:
                 else:
                     raise ValueError(f"{name} list is empty but species are specified for regularization")
             elif len(lst) == 1:
-                print(f"📡 Broadcasting single {name} value {lst[0]} to {n_species} species")
+                print(f"[BROADCAST] Broadcasting single {name} value {lst[0]} to {n_species} species")
                 return lst * n_species
             elif len(lst) == n_species:
                 return lst
@@ -490,7 +490,7 @@ class MMFPMFAnalyzer:
                 if lam <= 0:
                     raise ValueError(f"Lambda value must be > 0 for species {self.reg_species_raw[i]} (got {lam})")
                 if lam > 1e6:
-                    print(f"⚠️ Warning: Very large lambda {lam} for {self.reg_species_raw[i]} may cause numerical issues")
+                    print(f"[WARN] Warning: Very large lambda {lam} for {self.reg_species_raw[i]} may cause numerical issues")
             
             # Validate template choices
             valid_templates = {'zero', 'uniform', 'from-file'}
@@ -511,7 +511,7 @@ class MMFPMFAnalyzer:
                     )
                 # Check that files exist (will be done later in _prepare_regularization)
             
-            print(f"✅ Regularization parameters validated for {n_species} species")
+            print(f"[OK] Regularization parameters validated for {n_species} species")
             for i, species in enumerate(self.reg_species_raw):
                 template_desc = self.reg_template_norm[i]
                 if template_desc == 'from-file':
@@ -520,7 +520,7 @@ class MMFPMFAnalyzer:
                 print(f"   {species}: lambda={self.reg_lambda_norm[i]}, template={template_desc}")
                 
         except Exception as e:
-            print(f"❌ Regularization parameter validation failed: {e}")
+            print(f"[ERROR] Regularization parameter validation failed: {e}")
             raise
     
     def _construct_regularization_template(self, template_type, template_file_path, factors, species_name):
@@ -607,7 +607,7 @@ class MMFPMFAnalyzer:
         if not self._reg_enabled:
             return
             
-        print(f"🔧 Preparing regularization for {len(self.reg_species_raw)} species...")
+        print(f"[CONFIG] Preparing regularization for {len(self.reg_species_raw)} species...")
         
         # Map species names to concentration matrix column indices
         if not hasattr(self, 'concentration_data') or self.concentration_data is None:
@@ -627,7 +627,7 @@ class MMFPMFAnalyzer:
             
             # Check if species exists in data
             if species_upper not in name_to_idx:
-                print(f"   ⚠️ Warning: Regularization target '{species}' not found in data. Skipping.")
+                print(f"   [WARN] Warning: Regularization target '{species}' not found in data. Skipping.")
                 continue
                 
             col_idx = name_to_idx[species_upper]
@@ -638,7 +638,7 @@ class MMFPMFAnalyzer:
             template_file_path = None
             if template_type == 'from-file':
                 if file_counter >= len(self.reg_template_files_raw):
-                    print(f"   ❌ Error: Missing template file for {species}. Skipping.")
+                    print(f"   [ERROR] Error: Missing template file for {species}. Skipping.")
                     continue
                 template_file_path = self.reg_template_files_raw[file_counter]
                 file_counter += 1
@@ -664,17 +664,17 @@ class MMFPMFAnalyzer:
                 }
                 self._reg_plan.append(reg_item)
                 
-                print(f"   ✅ Mapped {species} to column {col_idx}: lambda={lambda_val}, template={template_type}")
+                print(f"   [OK] Mapped {species} to column {col_idx}: lambda={lambda_val}, template={template_type}")
                 
             except Exception as e:
-                print(f"   ❌ Error preparing template for {species}: {e}. Skipping.")
+                print(f"   [ERROR] Error preparing template for {species}: {e}. Skipping.")
                 continue
         
         if not self._reg_plan:
-            print(f"   ⚠️ Warning: No valid regularization targets found. Regularization will be disabled.")
+            print(f"   [WARN] Warning: No valid regularization targets found. Regularization will be disabled.")
             self._reg_enabled = False
         else:
-            print(f"   🎯 Regularization prepared for {len(self._reg_plan)} species")
+            print(f"   [INIT] Regularization prepared for {len(self._reg_plan)} species")
             
         return len(self._reg_plan)
     
@@ -707,18 +707,18 @@ class MMFPMFAnalyzer:
             good_values = u[~problematic_mask]
             if len(good_values) > 0:
                 replacement_value = np.median(good_values)
-                print(f"   ⚠️ {species_name}: Found {n_problematic}/{len(u)} problematic U values, replacing with median={replacement_value:.3e}")
+                print(f"   [WARN] {species_name}: Found {n_problematic}/{len(u)} problematic U values, replacing with median={replacement_value:.3e}")
             else:
                 # All values are problematic - use a reasonable default
                 replacement_value = 1.0  # Conservative uncertainty
-                print(f"   ⚠️ {species_name}: All U values problematic, using default={replacement_value}")
+                print(f"   [WARN] {species_name}: All U values problematic, using default={replacement_value}")
             
             # Replace problematic values
             u_clean = u.copy()
             u_clean[problematic_mask] = replacement_value
         else:
             u_clean = u
-            print(f"   ✅ {species_name}: All {len(u)} uncertainty values are positive and finite")
+            print(f"   [OK] {species_name}: All {len(u)} uncertainty values are positive and finite")
         
         # Step 2: Compute weights with epsilon floor to avoid division issues
         epsilon = 1e-12  # Minimum uncertainty floor
@@ -729,12 +729,12 @@ class MMFPMFAnalyzer:
         
         # Step 3: Final validation
         if not np.all(np.isfinite(we)):
-            print(f"   ❌ {species_name}: Non-finite weights after computation - this should not happen")
+            print(f"   [ERROR] {species_name}: Non-finite weights after computation - this should not happen")
             # Emergency fallback: uniform weights
             we = np.ones_like(we, dtype=np.float64)
             
         # Report statistics
-        print(f"   📊 {species_name} weights: min={np.min(we):.3e}, median={np.median(we):.3e}, max={np.max(we):.3e}")
+        print(f"   [DATA] {species_name} weights: min={np.min(we):.3e}, median={np.median(we):.3e}, max={np.max(we):.3e}")
         
         return we
     
@@ -789,14 +789,14 @@ class MMFPMFAnalyzer:
         # b = WT_scaled @ V_col + lambda * h0
         b = WT_scaled @ V_col + lambda_val * h0
         
-        print(f"   🔢 {species_name}: Solving ({k}x{k}) system, lambda={lambda_val}, cond(A)={np.linalg.cond(A):.2e}")
+        print(f"   [NUMBERS] {species_name}: Solving ({k}x{k}) system, lambda={lambda_val}, cond(A)={np.linalg.cond(A):.2e}")
         
         # Step 3: Solve linear system with numerical stability checks
         try:
             # Check condition number
             cond_A = np.linalg.cond(A)
             if cond_A > 1e12:
-                print(f"   ⚠️ {species_name}: High condition number {cond_A:.2e}, adding jitter")
+                print(f"   [WARN] {species_name}: High condition number {cond_A:.2e}, adding jitter")
                 # Add small diagonal jitter for numerical stability
                 jitter = 1e-12 * np.trace(A) / k
                 A += jitter * np.eye(k)
@@ -805,7 +805,7 @@ class MMFPMFAnalyzer:
             h_new = np.linalg.solve(A, b)
             
         except np.linalg.LinAlgError as e:
-            print(f"   ❌ {species_name}: Linear solve failed: {e}. Using fallback.")
+            print(f"   [ERROR] {species_name}: Linear solve failed: {e}. Using fallback.")
             # Fallback: use current h (no update)
             h_new = h_current.copy()
             
@@ -813,25 +813,25 @@ class MMFPMFAnalyzer:
         h_new_proj = np.maximum(h_new, 0.0)
         n_negative = np.sum(h_new < 0)
         if n_negative > 0:
-            print(f"   ✂️ {species_name}: Projected {n_negative}/{k} negative values to zero")
+            print(f"   [SYMBOL]️ {species_name}: Projected {n_negative}/{k} negative values to zero")
             
         # Step 5: Validate objective decrease (as specified in plan)
         objective_before = self._ridge_objective(W, V_col, we, h_current, lambda_val, h0)
         objective_after = self._ridge_objective(W, V_col, we, h_new_proj, lambda_val, h0)
         
         if objective_after > objective_before + 1e-9 * max(1.0, objective_before):
-            print(f"   ⚠️ {species_name}: Objective increased {objective_before:.3e} -> {objective_after:.3e}, keeping current h")
+            print(f"   [WARN] {species_name}: Objective increased {objective_before:.3e} -> {objective_after:.3e}, keeping current h")
             h_new_proj = h_current.copy()
         else:
             obj_decrease = objective_before - objective_after
             rel_decrease = obj_decrease / max(1e-12, objective_before)
-            print(f"   ✓ {species_name}: Objective decreased by {obj_decrease:.3e} ({rel_decrease:.2%})")
+            print(f"   [SYMBOL] {species_name}: Objective decreased by {obj_decrease:.3e} ({rel_decrease:.2%})")
             
         # Step 6: Report update statistics
         delta_norm = np.linalg.norm(h_new_proj - h_current)
         rel_change = delta_norm / (np.linalg.norm(h_current) + 1e-12)
         
-        print(f"   📈 {species_name}: ||h_new - h_old||={delta_norm:.3e}, rel_change={rel_change:.3e}")
+        print(f"   [RESULTS] {species_name}: ||h_new - h_old||={delta_norm:.3e}, rel_change={rel_change:.3e}")
         
         return h_new_proj
     
@@ -877,36 +877,56 @@ class MMFPMFAnalyzer:
         if not self._reg_enabled or not self._reg_plan:
             raise RuntimeError("Cannot run regularized training: regularization not enabled or prepared")
             
-        print(f"🔄 Starting staged regularization training: {self.reg_bursts} bursts, {self.reg_iter_per_burst} iter/burst")
+        print(f"[PROC] Starting staged regularization training: {self.reg_bursts} bursts, {self.reg_iter_per_burst} iter/burst")
         print(f"   Regularizing {len(self._reg_plan)} species: {[item['species'] for item in self._reg_plan]}")
         print(f"   Convergence tolerance: {self.reg_tol}")
+        
+        # Initialize Stage 9 diagnostics if available
+        try:
+            from regularization_diagnostics import create_regularization_diagnostics
+            self._reg_diagnostics = create_regularization_diagnostics()
+            diagnostics_available = True
+            print(f"   [DIAG] Stage 9 regularization diagnostics enabled")
+        except ImportError:
+            self._reg_diagnostics = None
+            diagnostics_available = False
+            print(f"   [INFO] Stage 9 diagnostics module not available")
         
         # Storage for burst diagnostics
         burst_diagnostics = []
         
         # Main staged training loop
         for burst_idx in range(self.reg_bursts):
-            print(f"\n🏃 Burst {burst_idx + 1}/{self.reg_bursts}:")
+            print(f"\n[RUN] Burst {burst_idx + 1}/{self.reg_bursts}:")
             
             # Step 1: Train ESAT model for one burst
-            print(f"   📚 Training ESAT for {self.reg_iter_per_burst} iterations...")
+            print(f"   [LEARN] Training ESAT for {self.reg_iter_per_burst} iterations...")
+            
+            # Record Q values before training for diagnostics
+            q_before = (float(getattr(sa_model, 'Qtrue', np.nan)) if getattr(sa_model, 'Qtrue', None) is not None else np.nan, 
+                       float(getattr(sa_model, 'Qrobust', np.nan)) if getattr(sa_model, 'Qrobust', None) is not None else np.nan)
+            
             try:
                 sa_model.train(
                     max_iter=self.reg_iter_per_burst,
                     robust_mode=self.robust_fit, 
                     robust_alpha=self.robust_alpha
                 )
-                print(f"   ✓ ESAT training completed")
+                print(f"   [SYMBOL] ESAT training completed")
             except Exception as e:
-                print(f"   ❌ ESAT training failed: {e}")
+                print(f"   [ERROR] ESAT training failed: {e}")
                 return False
+                
+            # Record Q values after training for diagnostics
+            q_after = (float(getattr(sa_model, 'Qtrue', np.nan)) if getattr(sa_model, 'Qtrue', None) is not None else np.nan, 
+                      float(getattr(sa_model, 'Qrobust', np.nan)) if getattr(sa_model, 'Qrobust', None) is not None else np.nan)
             
             # Step 2: Extract current W, H matrices
             try:
                 W = sa_model.W.astype(np.float64)
                 H = sa_model.H.astype(np.float64) 
                 
-                print(f"   📈 Extracted matrices: W{W.shape}, H{H.shape}")
+                print(f"   [RESULTS] Extracted matrices: W{W.shape}, H{H.shape}")
                 
                 # Validate matrix shapes
                 if W.shape != (V.shape[0], self.factors):
@@ -915,14 +935,14 @@ class MMFPMFAnalyzer:
                     raise ValueError(f"H shape mismatch: expected ({self.factors}, {V.shape[1]}), got {H.shape}")
                     
             except Exception as e:
-                print(f"   ❌ Matrix extraction failed: {e}")
+                print(f"   [ERROR] Matrix extraction failed: {e}")
                 return False
             
             # Step 3: Apply proximal updates to regulated species
             max_rel_change = 0.0
             burst_species_changes = []
             
-            print(f"   🎯 Applying proximal updates to {len(self._reg_plan)} regulated species...")
+            print(f"   [INIT] Applying proximal updates to {len(self._reg_plan)} regulated species...")
             
             for reg_item in self._reg_plan:
                 species = reg_item['species']
@@ -962,15 +982,15 @@ class MMFPMFAnalyzer:
                         'h_to_template_dist': np.linalg.norm(h_updated - h0)
                     })
                     
-                    print(f"     ✓ {species}: rel_change={rel_change:.3e}, ||h||={np.linalg.norm(h_updated):.3e}")
+                    print(f"     [SYMBOL] {species}: rel_change={rel_change:.3e}, ||h||={np.linalg.norm(h_updated):.3e}")
                     
                 except Exception as e:
-                    print(f"     ❌ {species}: Proximal update failed: {e}")
+                    print(f"     [ERROR] {species}: Proximal update failed: {e}")
                     # Continue with other species
                     continue
             
             # Step 4: Re-initialize ESAT with updated matrices
-            print(f"   🔄 Re-initializing ESAT with updated H matrix...")
+            print(f"   [PROC] Re-initializing ESAT with updated H matrix...")
             try:
                 # Use ESAT's public initialize method with updated H, W
                 sa_model.initialize(
@@ -991,12 +1011,12 @@ class MMFPMFAnalyzer:
                 w_diff = np.max(np.abs(W_check - W))
                 
                 if h_diff > 1e-10 or w_diff > 1e-10:
-                    print(f"   ⚠️ Warning: Matrix roundtrip error - H diff: {h_diff:.2e}, W diff: {w_diff:.2e}")
+                    print(f"   [WARN] Warning: Matrix roundtrip error - H diff: {h_diff:.2e}, W diff: {w_diff:.2e}")
                 else:
-                    print(f"   ✓ Matrix re-initialization successful")
+                    print(f"   [SYMBOL] Matrix re-initialization successful")
                     
             except Exception as e:
-                print(f"   ❌ ESAT re-initialization failed: {e}")
+                print(f"   [ERROR] ESAT re-initialization failed: {e}")
                 return False
             
             # Step 5: Record burst diagnostics
@@ -1010,19 +1030,62 @@ class MMFPMFAnalyzer:
             }
             burst_diagnostics.append(burst_diag)
             
-            print(f"   📉 Burst {burst_idx + 1} summary: max_rel_change={max_rel_change:.3e}, Qtrue={burst_diag['Qtrue']:.3f}")
+            print(f"   [CHART] Burst {burst_idx + 1} summary: max_rel_change={max_rel_change:.3e}, Qtrue={burst_diag['Qtrue']:.3f}")
+            
+            # Stage 9: Track convergence diagnostics for each regulated species
+            if diagnostics_available and self._reg_diagnostics:
+                for reg_item in self._reg_plan:
+                    species = reg_item['species']
+                    lambda_val = reg_item['lambda']
+                    
+                    # Calculate objective reduction for this species (approximate)
+                    obj_reduction = 0.0
+                    if not np.isnan(q_before[1]) and not np.isnan(q_after[1]):
+                        obj_reduction = q_before[1] - q_after[1]
+                    
+                    # Track convergence for this burst
+                    self._reg_diagnostics.track_convergence(
+                        burst_num=burst_idx + 1,
+                        species_name=species,
+                        lambda_val=lambda_val,
+                        q_start=q_before,
+                        q_end=q_after,
+                        obj_reduction=obj_reduction,
+                        rel_change=max_rel_change,  # Use max across all species
+                        converged=(max_rel_change < self.reg_tol),
+                        iterations=self.reg_iter_per_burst
+                    )
             
             # Step 6: Check convergence
             if max_rel_change < self.reg_tol:
-                print(f"   ✅ Regularization converged in burst {burst_idx + 1}: max_rel_change={max_rel_change:.3e} < tol={self.reg_tol}")
+                print(f"   [OK] Regularization converged in burst {burst_idx + 1}: max_rel_change={max_rel_change:.3e} < tol={self.reg_tol}")
                 break
             else:
-                print(f"   ➡️ Continuing: max_rel_change={max_rel_change:.3e} > tol={self.reg_tol}")
+                print(f"   [ARROW] Continuing: max_rel_change={max_rel_change:.3e} > tol={self.reg_tol}")
         
         # Store diagnostics for later saving
         self._reg_burst_diagnostics = burst_diagnostics
         
-        print(f"\n🏁 Staged regularization training completed:")
+        # Stage 9: Generate regularization diagnostics if available
+        if diagnostics_available and self._reg_diagnostics:
+            try:
+                # Save convergence and diagnostic data
+                self._reg_diagnostics.save_diagnostics_csv(self.output_dir, self.filename_prefix)
+                
+                # Generate convergence plots
+                conv_plot = self._reg_diagnostics.generate_convergence_plots(self.output_dir, self.filename_prefix)
+                if conv_plot:
+                    print(f"   [SAVE] Convergence plots: {conv_plot}")
+                
+                # Generate diagnostic summary report  
+                report = self._reg_diagnostics.generate_diagnostic_summary_report(self.output_dir, self.filename_prefix)
+                if report:
+                    print(f"   [SAVE] Diagnostic report: {report}")
+                    
+            except Exception as e:
+                print(f"   [WARN] Stage 9 diagnostics generation failed: {e}")
+        
+        print(f"\n[COMPLETE] Staged regularization training completed:")
         print(f"   Total bursts: {len(burst_diagnostics)}")
         print(f"   Final max_rel_change: {max_rel_change:.3e}")
         print(f"   Converged: {'Yes' if max_rel_change < self.reg_tol else 'No'}")
@@ -1060,7 +1123,7 @@ class MMFPMFAnalyzer:
     def _display_station_info(self):
         """Display prominent analysis information banner."""
         print("\n" + "=" * 60)
-        print("🧪 MMF PMF SOURCE APPORTIONMENT ANALYSIS (FIXED)")
+        print("[TEST] MMF PMF SOURCE APPORTIONMENT ANALYSIS (FIXED)")
         print("=" * 60)
         
         if self.station:
@@ -1074,16 +1137,16 @@ class MMFPMFAnalyzer:
                     display_name = self.station  # For Maries_Way
             else:
                 display_name = self.station
-            print(f"🏭 Station: {display_name}")
+            print(f"[STATION] Station: {display_name}")
         else:
             # Flexible data directory mode
-            print(f"📁 Data Directory: {self.data_dir}")
-            print(f"🔍 Patterns: {self.patterns}")
+            print(f"[EMOJI] Data Directory: {self.data_dir}")
+            print(f"[SEARCH] Patterns: {self.patterns}")
             
         if self.start_date or self.end_date:
             date_info = f"{self.start_date or 'All'} to {self.end_date or 'All'}"
-            print(f"📅 Analysis Period: {date_info}")
-        print(f"📂 Output Directory: {self.output_dir}")
+            print(f"[DATE] Analysis Period: {date_info}")
+        print(f"[FOLDER] Output Directory: {self.output_dir}")
         print("=" * 60)
     
     def _find_parquet_files(self):
@@ -1108,7 +1171,7 @@ class MMFPMFAnalyzer:
         # Remove duplicates and sort
         unique_files = sorted(list(set(matching_files)))
         
-        print(f"🔍 Found {len(unique_files)} matching parquet file(s):")
+        print(f"[SEARCH] Found {len(unique_files)} matching parquet file(s):")
         for f in unique_files:
             print(f"   - {f.name}")
         
@@ -1121,7 +1184,7 @@ class MMFPMFAnalyzer:
         
         if self.station:
             # Legacy mode: station-based loading
-            print(f"🔍 Loading MMF data for {self.station}...")
+            print(f"[SEARCH] Loading MMF data for {self.station}...")
             try:
                 parquet_file = get_mmf_parquet_file(self.station)
             except Exception as e:
@@ -1135,14 +1198,14 @@ class MMFPMFAnalyzer:
                 raise RuntimeError("Failed to load parquet data")
         else:
             # Flexible mode: data directory and patterns
-            print(f"🔍 Loading parquet data from {self.data_dir}...")
+            print(f"[SEARCH] Loading parquet data from {self.data_dir}...")
             parquet_files = self._find_parquet_files()
             if not parquet_files:
                 raise FileNotFoundError(f"No parquet files found matching patterns: {self.patterns}")
             
             # For now, use the first file (could be extended to merge multiple files)
             parquet_file = parquet_files[0]
-            print(f"📄 Using file: {parquet_file.name}")
+            print(f"[FILE] Using file: {parquet_file.name}")
             
             analyzer = ParquetAnalyzer(parquet_file)
             if not analyzer.load_data():
@@ -1162,7 +1225,7 @@ class MMFPMFAnalyzer:
             self.aggregation_method = meta.get('aggregation_method')
             self.min_valid_subsamples = int(meta.get('min_valid_subsamples')) if meta.get('min_valid_subsamples') else None
             if self.aggregation_timebase or self.aggregation_method:
-                print(f"🧭 Aggregation metadata: timebase={self.aggregation_timebase}, method={self.aggregation_method}, min_valid={self.min_valid_subsamples}")
+                print(f"[EMOJI] Aggregation metadata: timebase={self.aggregation_timebase}, method={self.aggregation_method}, min_valid={self.min_valid_subsamples}")
         except Exception as e:
             self.aggregation_timebase = None
             self.aggregation_method = None
@@ -1180,8 +1243,8 @@ class MMFPMFAnalyzer:
         if self.start_date or self.end_date:
             self._filter_date_range()
         
-        print(f"✅ Loaded {len(self.df):,} records")
-        print(f"📅 Date range: {self.df['datetime'].min()} to {self.df['datetime'].max()}")
+        print(f"[OK] Loaded {len(self.df):,} records")
+        print(f"[DATE] Date range: {self.df['datetime'].min()} to {self.df['datetime'].max()}")
     
     def _filter_date_range(self):
         """Filter data by specified date range."""
@@ -1197,18 +1260,18 @@ class MMFPMFAnalyzer:
             if self.start_date and self.start_date == self.end_date:
                 # Add 23:59:59 to include the entire day
                 end_dt = end_dt + pd.Timedelta(hours=23, minutes=59, seconds=59)
-                print(f"📅 Same start/end date detected - including full 24 hours of {self.start_date}")
+                print(f"[DATE] Same start/end date detected - including full 24 hours of {self.start_date}")
             self.df = self.df[self.df['datetime'] <= end_dt]
         
         filtered_len = len(self.df)
-        print(f"📊 Date filtering: {filtered_len:,} records ({original_len - filtered_len:,} excluded)")
+        print(f"[DATA] Date filtering: {filtered_len:,} records ({original_len - filtered_len:,} excluded)")
     
     def prepare_pmf_data(self):
         """
         Prepare concentration and uncertainty matrices for PMF analysis.
         Following EPA PMF 5.0 User Guide recommendations.
         """
-        print("🔧 Preparing PMF data matrices...")
+        print("[CONFIG] Preparing PMF data matrices...")
         
         # Define pollutant columns for PMF (gas, particle, and VOC data)
         # Exclude meteorological and QA columns as per EPA guidelines
@@ -1227,14 +1290,14 @@ class MMFPMFAnalyzer:
                 available_vocs.append(col)
         
         if available_vocs and not self.remove_voc:
-            print(f"✅ VOC species detected: {available_vocs}")
+            print(f"[OK] VOC species detected: {available_vocs}")
         elif available_vocs and self.remove_voc:
-            print(f"⚠️ VOC species detected but excluded due to --remove-voc flag: {available_vocs}")
+            print(f"[WARN] VOC species detected but excluded due to --remove-voc flag: {available_vocs}")
         
         # Select all applicable species for PMF analysis
         if self.remove_voc:
             all_species = gas_species + particle_species
-            print(f"🚫 VOC species excluded from PMF analysis")
+            print(f"[EMOJI] VOC species excluded from PMF analysis")
         else:
             all_species = gas_species + particle_species + voc_species
         
@@ -1262,22 +1325,22 @@ class MMFPMFAnalyzer:
             self._excluded_species_not_found = list(not_found_species)
             
             if excluded_columns:
-                print(f"🚫 Excluding {len(excluded_columns)} species from PMF analysis: {excluded_columns}")
+                print(f"[EMOJI] Excluding {len(excluded_columns)} species from PMF analysis: {excluded_columns}")
                 pollutant_columns = remaining_columns
             else:
-                print(f"⚠️ No species matched exclusion list: {list(self.exclude_species_set)}")
+                print(f"[WARN] No species matched exclusion list: {list(self.exclude_species_set)}")
             
             if not_found_species:
-                print(f"⚠️ {len(not_found_species)} requested exclusions not found in data: {list(not_found_species)}")
+                print(f"[WARN] {len(not_found_species)} requested exclusions not found in data: {list(not_found_species)}")
         
-        print(f"📋 Final pollutants for PMF: {pollutant_columns}")
+        print(f"[INFO] Final pollutants for PMF: {pollutant_columns}")
         
         # Report data availability for different species types
         gas_cols = [col for col in pollutant_columns if any(gas in col for gas in gas_species)]
         voc_cols = [col for col in pollutant_columns if any(voc in col for voc in voc_species)]
         pm_cols = [col for col in pollutant_columns if any(pm in col for pm in particle_species)]
         
-        print(f"📊 Species breakdown:")
+        print(f"[DATA] Species breakdown:")
         print(f"  Gas species ({len(gas_cols)}): {gas_cols}")
         
         if not self.remove_voc:
@@ -1310,11 +1373,11 @@ class MMFPMFAnalyzer:
         else:
             self.counts_data = None
 
-        # Standardize all concentrations to μg/m³ prior to computing uncertainties (if enabled)
+        # Standardize all concentrations to ug/m3 prior to computing uncertainties (if enabled)
         if self.scale_units:
             self._standardize_units_to_ugm3(pollutant_columns)
         else:
-            print("⚠️  Unit standardization disabled (--no-scale-units). Units will be used as-is.")
+            print("[WARN]  Unit standardization disabled (--no-scale-units). Units will be used as-is.")
         
         # Remove rows with too many missing values (EPA recommendation: >50% missing)
         missing_threshold = getattr(self, 'drop_row_threshold', 0.5)
@@ -1323,7 +1386,7 @@ class MMFPMFAnalyzer:
         if self.counts_data is not None:
             self.counts_data = self.counts_data.loc[self.concentration_data.index]
         
-        print(f"📊 After removing rows with >{missing_threshold*100:.1f}% missing: {len(self.concentration_data):,} records")
+        print(f"[DATA] After removing rows with >{missing_threshold*100:.1f}% missing: {len(self.concentration_data):,} records")
         
         # Generate uncertainty matrix following EPA guidelines
         self._generate_uncertainty_matrix(pollutant_columns)
@@ -1332,7 +1395,7 @@ class MMFPMFAnalyzer:
         if self.snr_enable and HAS_SNR_CATEGORIZATION:
             self._apply_snr_categorization(pollutant_columns)
         elif self.snr_enable and not HAS_SNR_CATEGORIZATION:
-            print("⚠️ S/N categorization requested but module not available. Proceeding without categorization.")
+            print("[WARN] S/N categorization requested but module not available. Proceeding without categorization.")
         
         # Apply species-specific uncertainty weighting if specified
         if self.species_weight_dict:
@@ -1345,22 +1408,216 @@ class MMFPMFAnalyzer:
         # Save processed data
         self._save_processed_data()
     
+    def _safe_unicode_clean(self, text):
+        """Clean Unicode characters for Windows cp1252 compatibility."""
+        if text is None:
+            return 'unknown'
+        try:
+            # Convert to string and clean common problematic Unicode chars
+            s = str(text)
+            # Replace Greek mu (μ) with latin u
+            s = s.replace('\u03bc', 'u')
+            # Replace superscript 2 and 3
+            s = s.replace('\u00b2', '2').replace('\u00b3', '3') 
+            # Replace arrow characters
+            s = s.replace('\u2192', '->')
+            # Try to encode/decode to catch other problematic characters
+            s = s.encode('ascii', errors='replace').decode('ascii')
+            return s
+        except Exception:
+            return 'unknown'
+    
+    def _compute_closure_metrics(self, V, U, W, H, species_names):
+        """Compute species-level closure metrics for mass balance analysis.
+        
+        Args:
+            V (np.ndarray): Concentration matrix (n_samples, n_species)
+            U (np.ndarray): Uncertainty matrix (n_samples, n_species) 
+            W (np.ndarray): Factor contributions (n_samples, n_factors)
+            H (np.ndarray): Factor profiles (n_factors, n_species)
+            species_names (list): Species names matching V columns
+            
+        Returns:
+            tuple: (closure_df, group_summary) where closure_df is a DataFrame with
+                   per-species metrics and group_summary is a dict with group closures
+        """
+        import numpy as np
+        import pandas as pd
+        
+        # Guard against numerical issues
+        eps = 1e-12
+        U_safe = np.maximum(U, eps)
+        
+        # Reconstruct data matrix
+        R = W @ H  # (n_samples, n_species)
+        
+        # Compute residuals
+        res = V - R
+        
+        # Uncertainty weights
+        w = 1.0 / (U_safe ** 2)
+        
+        # Per-species metrics
+        meas_sum = np.maximum(np.sum(V, axis=0), eps)
+        reco_sum = np.sum(R, axis=0)
+        closure_pct = 100.0 * reco_sum / meas_sum
+        
+        # Uncertainty-weighted closure
+        meas_w_sum = np.maximum(np.sum(w * V, axis=0), eps)
+        reco_w_sum = np.sum(w * R, axis=0)
+        closure_w_pct = 100.0 * reco_w_sum / meas_w_sum
+        
+        # Species-wise Q contribution
+        Q_species = np.sum(((V - R) / U_safe) ** 2, axis=0)
+        total_Q = np.maximum(np.sum(Q_species), eps)
+        q_share_pct = 100.0 * Q_species / total_Q
+        
+        # RMSE and normalized RMSE
+        rmse = np.sqrt(np.mean(res ** 2, axis=0))
+        mean_conc = np.maximum(np.mean(V, axis=0), eps)
+        nrmse = 100.0 * rmse / mean_conc
+        
+        # Median residuals
+        med_res = np.median(res, axis=0)
+        
+        # Create DataFrame
+        closure_df = pd.DataFrame({
+            'species': species_names,
+            'measured_sum': meas_sum,
+            'reconstructed_sum': reco_sum,
+            'closure_pct': closure_pct,
+            'closure_w_pct': closure_w_pct,
+            'Q_species': Q_species,
+            'q_share_pct': q_share_pct,
+            'rmse': rmse,
+            'nrmse': nrmse,
+            'median_residual': med_res
+        })
+        
+        # Compute group closures (avoid mixed-unit issues)
+        def group_closure(species_list, name):
+            """Compute closure for a group of species."""
+            indices = [i for i, sp in enumerate(species_names) if sp in species_list]
+            if not indices:
+                return name, np.nan, 0
+            
+            group_meas = np.sum(V[:, indices])
+            group_reco = np.sum(R[:, indices])
+            group_closure = 100.0 * group_reco / np.maximum(group_meas, eps)
+            
+            return name, group_closure, len(indices)
+        
+        # Define species groups
+        gas_species = ['CH4', 'NOX', 'NO', 'NO2', 'SO2', 'H2S']
+        voc_species = ['Benzene', 'Toluene', 'Ethylbenzene', 'm&p-Xylene']
+        pm_species = [sp for sp in species_names if 'FIDAS' in sp]
+        
+        # Compute group closures
+        group_summary = {}
+        for group_name, species_list in [('Gases', gas_species), ('VOCs', voc_species), ('PM', pm_species)]:
+            name, closure, count = group_closure(species_list, group_name)
+            if count > 0:
+                group_summary[name] = {'closure_pct': closure, 'n_species': count}
+        
+        return closure_df, group_summary
+    
+    def _plot_closure_summary(self, closure_df, group_summary, dashboard_dir):
+        """Create closure summary plot highlighting regularized species.
+        
+        Args:
+            closure_df (pd.DataFrame): Per-species closure metrics
+            group_summary (dict): Group-level closure summary
+            dashboard_dir (Path): Dashboard directory for saving plots
+            
+        Returns:
+            Path: Path to the saved plot file
+        """
+        import matplotlib.pyplot as plt
+        import numpy as np
+        
+        # Set matplotlib to non-interactive mode
+        plt.ioff()
+        
+        fig, ax = plt.subplots(figsize=(12, 6))
+        
+        # Get species and closure data
+        species = closure_df['species'].values
+        closure_pct = closure_df['closure_pct'].values
+        closure_w_pct = closure_df['closure_w_pct'].values
+        q_share_pct = closure_df['q_share_pct'].values
+        
+        # Default colors
+        colors = ['#1f77b4'] * len(species)  # Blue for normal species
+        
+        # Highlight regularized species in red
+        reg_targets = set()
+        if hasattr(self, '_reg_enabled') and self._reg_enabled and hasattr(self, '_reg_plan'):
+            reg_targets = set([ri['species'] for ri in self._reg_plan])
+        
+        for i, sp in enumerate(species):
+            if sp in reg_targets:
+                colors[i] = '#d62728'  # Red for regularized species
+        
+        # Create bar plot
+        x = np.arange(len(species))
+        bars = ax.bar(x, closure_pct, color=colors, alpha=0.7, label='Closure (%)', edgecolor='black', linewidth=0.5)
+        
+        # Add uncertainty-weighted closure as line
+        ax.plot(x, closure_w_pct, color='black', marker='o', linewidth=2, markersize=4, 
+                label='Weighted Closure (%)', alpha=0.8)
+        
+        # Add reference line at 100%
+        ax.axhline(100.0, color='gray', linestyle='--', alpha=0.6, label='Perfect Closure')
+        
+        # Formatting
+        ax.set_xticks(x)
+        ax.set_xticklabels(species, rotation=45, ha='right')
+        ax.set_ylabel('Closure (%)')
+        ax.set_title('Species-Level Mass Closure (Reconstructed / Measured)')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        
+        # Add text annotation for regularized species
+        if reg_targets:
+            reg_species_str = ', '.join(sorted(reg_targets))
+            ax.text(0.02, 0.98, f'Regularized: {reg_species_str}', transform=ax.transAxes, 
+                   verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+        
+        # Add group closure summary in text box
+        if group_summary:
+            group_text = 'Group Closures:\n'
+            for group, data in group_summary.items():
+                group_text += f'{group}: {data["closure_pct"]:.1f}% ({data["n_species"]} spp)\n'
+            
+            ax.text(0.98, 0.98, group_text.strip(), transform=ax.transAxes,
+                   verticalalignment='top', horizontalalignment='right',
+                   bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.5))
+        
+        plt.tight_layout()
+        
+        # Save plot
+        plot_file = dashboard_dir / f"{self.filename_prefix}_closure_summary.png"
+        plt.savefig(plot_file, dpi=300, bbox_inches='tight', facecolor='white')
+        plt.close()
+        
+        return plot_file
+    
     def _normalize_unit_string(self, unit_str):
         """Normalize unit strings to a canonical form for comparison."""
         if unit_str is None:
             return None
         s = str(unit_str).strip().lower()
-        s = s.replace('µ', 'μ')
+        s = s.replace('μ', 'u')
         s = s.replace(' ', '')
         s = s.replace('(', '').replace(')', '')
         # Normalize common variants
-        s = s.replace('ug/m³', 'ug/m3')
-        s = s.replace('μg/m³', 'ug/m3')
+        s = s.replace('ug/m3', 'ug/m3')
+        s = s.replace('ug/m3', 'ug/m3')
+        s = s.replace('ug/m3', 'ug/m3')
         s = s.replace('μg/m3', 'ug/m3')
-        s = s.replace('µg/m³', 'ug/m3')
-        s = s.replace('µg/m3', 'ug/m3')
-        s = s.replace('mg/m³', 'mg/m3')
-        s = s.replace('ng/m³', 'ng/m3')
+        s = s.replace('μg/m3', 'ug/m3')
+        s = s.replace('mg/m3', 'mg/m3')
+        s = s.replace('ng/m3', 'ng/m3')
         s = s.replace('ugm3', 'ug/m3')
         s = s.replace('mgm3', 'mg/m3')
         s = s.replace('ngm3', 'ng/m3')
@@ -1368,10 +1625,10 @@ class MMFPMFAnalyzer:
 
     def _standardize_units_to_ugm3(self, pollutant_columns):
         """
-        Ensure all concentration columns are in μg/m³ before uncertainty calc.
-        - If a column is reported in mg/m³, multiply by 1000
-        - If in ng/m³, divide by 1000
-        - Update self.units to 'μg/m³'
+        Ensure all concentration columns are in ug/m3 before uncertainty calc.
+        - If a column is reported in mg/m3, multiply by 1000
+        - If in ng/m3, divide by 1000
+        - Update self.units to 'ug/m3'
         - Warn if units are non-mass-based (e.g., ppm/ppb) as no conversion is applied
         """
         conversions = []
@@ -1389,26 +1646,30 @@ class MMFPMFAnalyzer:
                     pass
             factor = None
             if unit_norm in ('ug/m3', None):
-                continue  # already μg/m³ or unknown (leave as-is)
+                continue  # already ug/m3 or unknown (leave as-is)
             elif unit_norm == 'mg/m3':
                 factor = 1000.0
             elif unit_norm == 'ng/m3':
                 factor = 0.001
             elif unit_norm in ('ppm', 'ppb'):
-                print(f"⚠️ Units for {col} are in {orig_unit}; no automatic ppm/ppb → μg/m³ conversion applied.")
+                safe_unit = self._safe_unicode_clean(orig_unit)
+                print(f"[WARN] Units for {col} are in {safe_unit}; no automatic ppm/ppb -> ug/m3 conversion applied.")
                 continue
             else:
-                # Unrecognized units
-                print(f"⚠️ Unrecognized unit '{orig_unit}' for {col}; leaving values unchanged.")
+                # Unrecognized units - sanitize unicode for Windows compatibility
+                safe_unit = self._safe_unicode_clean(orig_unit)
+                print(f"[WARN] Unrecognized unit '{safe_unit}' for {col}; leaving values unchanged.")
                 continue
             if factor is not None:
                 self.concentration_data[col] = self.concentration_data[col] * factor
-                self.units[col] = 'μg/m³'
+                self.units[col] = 'ug/m3'
                 conversions.append((col, orig_unit, factor))
         if conversions:
-            print("🔁 Standardized units to μg/m³ for the following columns:")
+            print("[CYCLE] Standardized units to ug/m3 for the following columns:")
             for col, ou, f in conversions:
-                print(f"  - {col}: {ou} → μg/m³ (×{f})")
+                # Sanitize units for Windows compatibility
+                safe_ou = self._safe_unicode_clean(ou)
+                print(f"  - {col}: {safe_ou} -> ug/m3 (x{f})")
 
     def _apply_snr_categorization(self, pollutant_columns):
         """
@@ -1418,7 +1679,7 @@ class MMFPMFAnalyzer:
         and data quality metrics. Weak species have their uncertainty tripled,
         while bad species are excluded from the analysis entirely.
         """
-        print("🔢 Applying S/N-based feature categorization...")
+        print("[NUMBERS] Applying S/N-based feature categorization...")
         
         # Create EPA S/N categorizer with configured thresholds
         categorizer = create_snr_categorizer(
@@ -1453,7 +1714,7 @@ class MMFPMFAnalyzer:
         
         # Apply categorization (currently just modifies uncertainties)
         # If ESAT integration is available in future, we'd apply via DataHandler here
-        print("🔄 Applying categorization to uncertainty matrix...")
+        print("[PROC] Applying categorization to uncertainty matrix...")
         
         # Collect species to exclude
         excluded_species = []
@@ -1461,16 +1722,16 @@ class MMFPMFAnalyzer:
         for species, category in categories.items():
             if category == 'weak':
                 # Triple uncertainties for weak species (EPA PMF 5.0 recommendation)
-                print(f"   ⚠️ {species}: Weak - tripling uncertainty")
+                print(f"   [WARN] {species}: Weak - tripling uncertainty")
                 self.uncertainty_data[species] = self.uncertainty_data[species] * 3.0
             elif category == 'bad' and self.exclude_bad:
                 # Mark bad species for exclusion from analysis
-                print(f"   ❌ {species}: Bad - excluding from analysis")
+                print(f"   [ERROR] {species}: Bad - excluding from analysis")
                 excluded_species.append(species)
         
         # Remove bad species from data matrices
         if excluded_species:
-            print(f"   🗑️ Removing {len(excluded_species)} bad species from matrices: {excluded_species}")
+            print(f"   [REMOVE] Removing {len(excluded_species)} bad species from matrices: {excluded_species}")
             self.concentration_data = self.concentration_data.drop(columns=excluded_species)
             self.uncertainty_data = self.uncertainty_data.drop(columns=excluded_species)
             
@@ -1480,7 +1741,7 @@ class MMFPMFAnalyzer:
                 count_cols_to_drop = [f"n_{species}" for species in excluded_species if f"n_{species}" in self.counts_data.columns]
                 if count_cols_to_drop:
                     self.counts_data = self.counts_data.drop(columns=count_cols_to_drop)
-                    print(f"   🗑️ Removed corresponding count columns: {count_cols_to_drop}")
+                    print(f"   [REMOVE] Removed corresponding count columns: {count_cols_to_drop}")
         
         # Save diagnostics if requested
         if self.write_diagnostics:
@@ -1489,7 +1750,7 @@ class MMFPMFAnalyzer:
         # Summary report
         summary = categorizer.get_summary()
         if summary:
-            print(f"\n📊 S/N Categorization Summary:")
+            print(f"\n[DATA] S/N Categorization Summary:")
             print(f"   Total species: {summary['total_species']}")
             print(f"   Strong: {summary['strong_count']} species")
             print(f"   Weak: {summary['weak_count']} species") 
@@ -1505,7 +1766,7 @@ class MMFPMFAnalyzer:
         downweights them in the ESAT LS-PMF objective function. Applied after
         S/N categorization and before saving data for ESAT.
         """
-        print("🎯 Applying species-specific uncertainty weighting...")
+        print("[INIT] Applying species-specific uncertainty weighting...")
         
         # Build mapping of actual column names to weight factors
         species_weights_applied = {}
@@ -1524,10 +1785,10 @@ class MMFPMFAnalyzer:
                 original_uncertainty = self.uncertainty_data[matched_column].copy()
                 self.uncertainty_data[matched_column] = original_uncertainty * weight_factor
                 species_weights_applied[matched_column] = weight_factor
-                print(f"   ✅ {matched_column}: Uncertainty multiplied by {weight_factor}")
+                print(f"   [OK] {matched_column}: Uncertainty multiplied by {weight_factor}")
             else:
                 species_weights_not_found[species_key] = weight_factor
-                print(f"   ⚠️ {species_key}: Species not found in data (skipped)")
+                print(f"   [WARN] {species_key}: Species not found in data (skipped)")
         
         # Store results for provenance tracking
         self._species_weights_applied = species_weights_applied
@@ -1535,9 +1796,9 @@ class MMFPMFAnalyzer:
         
         # Summary
         if species_weights_applied:
-            print(f"   📊 Applied weights to {len(species_weights_applied)} species")
+            print(f"   [DATA] Applied weights to {len(species_weights_applied)} species")
         if species_weights_not_found:
-            print(f"   ⚠️ {len(species_weights_not_found)} requested species not found in data")
+            print(f"   [WARN] {len(species_weights_not_found)} requested species not found in data")
         
         # Write species weights CSV for provenance
         self._save_species_weights_csv()
@@ -1568,7 +1829,7 @@ class MMFPMFAnalyzer:
             weights_df = pd.DataFrame(species_weights_data)
             weights_file = self.output_dir / f"{self.filename_prefix}_species_weights.csv"
             weights_df.to_csv(weights_file, index=False)
-            print(f"   💾 Species weights saved: {weights_file.name}")
+            print(f"   [SAVE] Species weights saved: {weights_file.name}")
     
     def _save_species_exclusions_csv(self):
         """Save species exclusion application results to CSV for provenance."""
@@ -1598,7 +1859,7 @@ class MMFPMFAnalyzer:
             exclusions_df = pd.DataFrame(species_exclusion_data)
             exclusions_file = self.output_dir / f"{self.filename_prefix}_species_exclusions.csv"
             exclusions_df.to_csv(exclusions_file, index=False)
-            print(f"   💾 Species exclusions saved: {exclusions_file.name}")
+            print(f"   [SAVE] Species exclusions saved: {exclusions_file.name}")
     
     def _generate_uncertainty_matrix(self, pollutant_columns):
         """
@@ -1607,7 +1868,7 @@ class MMFPMFAnalyzer:
         EPA Mode: Uses EPA formulas with optional aggregation scaling
         Legacy Mode: Original implementation with fixed MDL/EF table
         """
-        print(f"🔬 Generating uncertainty matrix (mode: {self.uncertainty_mode})...")
+        print(f"[ANALYSIS] Generating uncertainty matrix (mode: {self.uncertainty_mode})...")
         
         if self.uncertainty_mode == 'epa' and HAS_EPA_UNCERTAINTY:
             return self._generate_epa_uncertainty_matrix(pollutant_columns)
@@ -1620,7 +1881,7 @@ class MMFPMFAnalyzer:
         """
         Generate uncertainty matrix using EPA formulas and aggregation scaling.
         """
-        print("📐 Using EPA uncertainty formulas...")
+        print("[GEOMETRY] Using EPA uncertainty formulas...")
         
         # Create EPA uncertainty calculator
         calculator = create_epa_uncertainty_calculator(
@@ -1645,11 +1906,11 @@ class MMFPMFAnalyzer:
             counts_file = self.output_dir / f"{self.filename_prefix}_counts.csv"
             if counts_file.exists():
                 counts_df = pd.read_csv(counts_file, index_col=0)
-                print(f"   📊 Loaded aggregation counts for scaling")
+                print(f"   [DATA] Loaded aggregation counts for scaling")
             else:
-                print(f"   ℹ️ No aggregation counts available - EPA formulas only")
+                print(f"   [INFO] No aggregation counts available - EPA formulas only")
         except Exception as e:
-            print(f"   ⚠️ Could not load aggregation counts: {e}")
+            print(f"   [WARN] Could not load aggregation counts: {e}")
         
         # Calculate EPA uncertainties with aggregation scaling
         epa_uncertainties = calculator.calculate_species_uncertainties(
@@ -1696,11 +1957,11 @@ class MMFPMFAnalyzer:
                 n_meas = int((~missing_mask & ~bdl_mask).sum())
                 n_bdl = int(bdl_mask.sum())
                 n_missing = int(missing_mask.sum())
-                print(f"   ✅ {species}: EF={EF:.3f}, MDL={MDL:.1f} | measured={n_meas} ({n_meas/total*100:.1f}%), "
+                print(f"   [OK] {species}: EF={EF:.3f}, MDL={MDL:.1f} | measured={n_meas} ({n_meas/total*100:.1f}%), "
                       f"BDL={n_bdl} ({n_bdl/total*100:.1f}%), missing={n_missing} ({n_missing/total*100:.1f}%)")
             else:
                 # Fallback for species not handled by EPA calculator
-                print(f"   ⚠️ {species}: No EPA data, using default uncertainty")
+                print(f"   [WARN] {species}: No EPA data, using default uncertainty")
                 self.uncertainty_data[species] = 1.0
         
         # Handle non-pollutant columns (if any)
@@ -1708,41 +1969,41 @@ class MMFPMFAnalyzer:
             if col not in pollutant_columns:
                 self.uncertainty_data[col] = 1.0  # Default uncertainty
         
-        print(f"🔬 EPA uncertainty matrix completed for {len(pollutant_columns)} species")
+        print(f"[ANALYSIS] EPA uncertainty matrix completed for {len(pollutant_columns)} species")
         
     def _generate_legacy_uncertainty_matrix(self, pollutant_columns):
         """
         Generate uncertainty matrix using original implementation.
-        All MDL values below are specified in μg/m³ to match standardized V.
+        All MDL values below are specified in ug/m3 to match standardized V.
         
-        EPA Formula: σ = sqrt((error_fraction * concentration)² + (MDL)²)
+        EPA Formula: σ = sqrt((error_fraction * concentration)2 + (MDL)2)
         """
         
-        # EPA-recommended MDL values and error fractions by pollutant type (all in μg/m³)
+        # EPA-recommended MDL values and error fractions by pollutant type (all in ug/m3)
         # Based on typical instrument specifications and EPA guidance
         mdl_values = {
-            'H2S': 0.5,      # μg/m³
-            'CH4': 50.0,     # μg/m³ (converted from 0.05 mg/m³ → 50 μg/m³)
-            'SO2': 0.5,      # μg/m³
-            'NOX': 1.0,      # μg/m³
-            'NO': 0.5,       # μg/m³
-            'NO2': 1.0,      # μg/m³
-            'PM1 FIDAS': 1.0,    # μg/m³
-            'PM1': 1.0,          # μg/m³
-            'PM2.5 FIDAS': 1.0,  # μg/m³
-            'PM2.5': 1.0,        # μg/m³
-            'PM4 FIDAS': 1.5,    # μg/m³
-            'PM4': 1.5,          # μg/m³
-            'PM10 FIDAS': 2.0,   # μg/m³
-            'PM10': 2.0,         # μg/m³
-            'TSP FIDAS': 2.5,    # μg/m³
-            'TSP': 2.5,          # μg/m³
-            # VOC species (BTEX compounds) - typical GC-MS detection limits (μg/m³)
-            'Benzene': 0.01,     # μg/m³
-            'Toluene': 0.02,     # μg/m³
-            'Ethylbenzene': 0.02,    # μg/m³
-            'Xylene': 0.02,      # μg/m³ (covers m&p-Xylene)
-            'm&p-Xylene': 0.02   # μg/m³ (specific for mixed isomers)
+            'H2S': 0.5,      # ug/m3
+            'CH4': 50.0,     # ug/m3 (converted from 0.05 mg/m3 -> 50 ug/m3)
+            'SO2': 0.5,      # ug/m3
+            'NOX': 1.0,      # ug/m3
+            'NO': 0.5,       # ug/m3
+            'NO2': 1.0,      # ug/m3
+            'PM1 FIDAS': 1.0,    # ug/m3
+            'PM1': 1.0,          # ug/m3
+            'PM2.5 FIDAS': 1.0,  # ug/m3
+            'PM2.5': 1.0,        # ug/m3
+            'PM4 FIDAS': 1.5,    # ug/m3
+            'PM4': 1.5,          # ug/m3
+            'PM10 FIDAS': 2.0,   # ug/m3
+            'PM10': 2.0,         # ug/m3
+            'TSP FIDAS': 2.5,    # ug/m3
+            'TSP': 2.5,          # ug/m3
+            # VOC species (BTEX compounds) - typical GC-MS detection limits (ug/m3)
+            'Benzene': 0.01,     # ug/m3
+            'Toluene': 0.02,     # ug/m3
+            'Ethylbenzene': 0.02,    # ug/m3
+            'Xylene': 0.02,      # ug/m3 (covers m&p-Xylene)
+            'm&p-Xylene': 0.02   # ug/m3 (specific for mixed isomers)
         }
         
         # EPA-recommended error fractions (measurement precision)
@@ -1783,7 +2044,7 @@ class MMFPMFAnalyzer:
 
         for species in pollutant_columns:
             # Find matching MDL and error fraction (partial name matching)
-            mdl = 1.0  # Default MDL (μg/m³)
+            mdl = 1.0  # Default MDL (ug/m3)
             err_frac = 0.15  # Default error fraction
 
             for key in mdl_values.keys():
@@ -1840,12 +2101,13 @@ class MMFPMFAnalyzer:
             n_meas = int(measured_mask.sum())
             n_bdl = int(bdl_mask.sum())
             n_missing = int(missing_mask.sum())
+            safe_units = self._safe_unicode_clean(self.units.get(species, 'unknown'))
             print(f"  {species}: MDL={mdl}, Err={err_frac*100:.1f}%, min_u={self.legacy_min_u} | measured={n_meas} ({n_meas/total*100:.1f}%), "
-                  f"BDL={n_bdl} ({n_bdl/total*100:.1f}%), missing={n_missing} ({n_missing/total*100:.1f}%) | Units={self.units.get(species, 'unknown')}")
+                  f"BDL={n_bdl} ({n_bdl/total*100:.1f}%), missing={n_missing} ({n_missing/total*100:.1f}%) | Units={safe_units}")
     
     def _handle_missing_values(self):
         """Handle missing values following EPA Method 1."""
-        print("🔄 Handling missing values (EPA Method 1)...")
+        print("[PROC] Handling missing values (EPA Method 1)...")
         
         for col in self.concentration_data.columns:
             # Replace missing concentrations with median
@@ -1870,7 +2132,7 @@ class MMFPMFAnalyzer:
     
     def _remove_remaining_nan_values(self):
         """Remove any remaining NaN values that could cause ESAT to fail."""
-        print("🔍 Final NaN check and removal...")
+        print("[SEARCH] Final NaN check and removal...")
         
         # Check for NaN in concentration data
         conc_nan_count = self.concentration_data.isna().sum().sum()
@@ -1898,7 +2160,7 @@ class MMFPMFAnalyzer:
             print(f"  Warning: {unc_inf_count} infinite values found in uncertainty data")
             self.uncertainty_data = self.uncertainty_data.replace([np.inf, -np.inf], 1.0)
         
-        print(f"  ✅ Data cleaning complete: {len(self.concentration_data)} valid records")
+        print(f"  [OK] Data cleaning complete: {len(self.concentration_data)} valid records")
     
     def _save_processed_data(self):
         """Save processed concentration and uncertainty data."""
@@ -1928,10 +2190,10 @@ class MMFPMFAnalyzer:
                 missing_file = self.output_dir / f"{self.filename_prefix}_missing_mask.csv"
                 bdl_mask.to_csv(bdl_file)
                 missing_mask.to_csv(missing_file)
-                print(f"💾 Saved BDL mask: {bdl_file}")
-                print(f"💾 Saved Missing mask: {missing_file}")
+                print(f"[SAVE] Saved BDL mask: {bdl_file}")
+                print(f"[SAVE] Saved Missing mask: {missing_file}")
         except Exception as e:
-            print(f"⚠️ Could not save masks: {e}")
+            print(f"[WARN] Could not save masks: {e}")
 
         # Optionally save counts if available
         try:
@@ -1940,21 +2202,21 @@ class MMFPMFAnalyzer:
                 counts_out.index = datetime_values
                 counts_file = self.output_dir / f"{self.filename_prefix}_counts.csv"
                 counts_out.to_csv(counts_file)
-                print(f"💾 Saved aggregation counts: {counts_file}")
+                print(f"[SAVE] Saved aggregation counts: {counts_file}")
         except Exception as e:
-            print(f"⚠️ Could not save counts: {e}")
+            print(f"[WARN] Could not save counts: {e}")
         
-        print(f"💾 Saved concentration data: {conc_file}")
-        print(f"💾 Saved uncertainty data: {unc_file}")
+        print(f"[SAVE] Saved concentration data: {conc_file}")
+        print(f"[SAVE] Saved uncertainty data: {unc_file}")
         
         # Save EPA-specific diagnostic files if requested
         if getattr(self, 'write_diagnostics', True) and self.uncertainty_mode == 'epa':
             try:
                 epa_unc_file = self.output_dir / f"{self.filename_prefix}_uncertainties_epa.csv"
                 unc_data.to_csv(epa_unc_file)
-                print(f"💾 Saved EPA uncertainties: {epa_unc_file}")
+                print(f"[SAVE] Saved EPA uncertainties: {epa_unc_file}")
             except Exception as e:
-                print(f"⚠️ Could not save EPA uncertainties: {e}")
+                print(f"[WARN] Could not save EPA uncertainties: {e}")
         
         # Save S/N categorization mapping if available
         if getattr(self, 'write_diagnostics', True) and hasattr(self, '_snr_categories'):
@@ -1965,23 +2227,23 @@ class MMFPMFAnalyzer:
                     'category': list(self._snr_categories.values())
                 })
                 categories_df.to_csv(categories_file, index=False)
-                print(f"💾 Saved species categories: {categories_file}")
+                print(f"[SAVE] Saved species categories: {categories_file}")
             except Exception as e:
-                print(f"⚠️ Could not save S/N categories: {e}")
+                print(f"[WARN] Could not save S/N categories: {e}")
     
     def run_pmf_analysis(self):
         """
         Run PMF analysis using ESAT following EPA best practices.
         FIXED VERSION based on successful test.
         """
-        print("🚀 Starting PMF analysis...")
+        print("[START] Starting PMF analysis...")
         
         # Get data files
         conc_file = self.output_dir / f"{self.filename_prefix}_concentrations.csv"
         unc_file = self.output_dir / f"{self.filename_prefix}_uncertainties.csv"
         
         # Load data directly into numpy arrays (bypass DataHandler issues)
-        print("📊 Loading data matrices...")
+        print("[DATA] Loading data matrices...")
         conc_df = pd.read_csv(conc_file, index_col=0)
         unc_df = pd.read_csv(unc_file, index_col=0)
         
@@ -2009,18 +2271,18 @@ class MMFPMFAnalyzer:
                                 # Median approx: 1.253/sqrt(n)
                                 scale = 1.253 / np.sqrt(n)
                             U[:, j] = U[:, j] * scale
-                    print(f"🧮 Applied legacy uncertainty scaling based on aggregation counts (method={self.aggregation_method})")
+                    print(f"[CALC] Applied legacy uncertainty scaling based on aggregation counts (method={self.aggregation_method})")
             except Exception as e:
-                print(f"⚠️ Could not apply aggregation-based uncertainty scaling: {e}")
+                print(f"[WARN] Could not apply aggregation-based uncertainty scaling: {e}")
         else:
-            print(f"ℹ️ EPA mode: aggregation scaling already included in uncertainty calculation")
+            print(f"[INFO] EPA mode: aggregation scaling already included in uncertainty calculation")
         
-        print(f"📊 Data matrices: V={V.shape}, U={U.shape}")
-        print(f"📋 Species: {', '.join(species_names)}")
+        print(f"[DATA] Data matrices: V={V.shape}, U={U.shape}")
+        print(f"[INFO] Species: {', '.join(species_names)}")
         
         # Check if we have any data
         if V.size == 0 or U.size == 0:
-            print("❌ Error: No data available for PMF analysis!")
+            print("[ERROR] Error: No data available for PMF analysis!")
             print("   This could be due to:")
             print("   1. Date range outside available data")
             print("   2. All data filtered out due to missing values")
@@ -2028,7 +2290,7 @@ class MMFPMFAnalyzer:
             return False
         
         if V.shape[0] < 10:
-            print(f"⚠️ Warning: Very few data points ({V.shape[0]}) - PMF results may be unreliable")
+            print(f"[WARN] Warning: Very few data points ({V.shape[0]}) - PMF results may be unreliable")
             print("   Consider expanding date range or reducing missing data threshold")
         
         # Ensure physical constraints without distorting scale
@@ -2049,7 +2311,7 @@ class MMFPMFAnalyzer:
             U = np.where(np.isposinf(U), max_U, U)
             U = np.where(np.isneginf(U) | (U <= 0), min_positive, U)
         
-        print(f"📊 Final data validation:")
+        print(f"[DATA] Final data validation:")
         print(f"  V range: [{np.min(V):.3f}, {np.max(V):.3f}]")
         print(f"  U range: [{np.min(U):.3f}, {np.max(U):.3f}]")
         print(f"  Valid data points: {np.sum(~np.isnan(V) & ~np.isnan(U))} / {V.size}")
@@ -2062,29 +2324,29 @@ class MMFPMFAnalyzer:
             try:
                 n_reg_targets = self._prepare_regularization()
                 if n_reg_targets == 0:
-                    print("⚠️ Regularization disabled: no valid targets found")
+                    print("[WARN] Regularization disabled: no valid targets found")
                     self._reg_enabled = False
                 else:
-                    print(f"✅ Regularization preparation complete: {n_reg_targets} targets mapped")
+                    print(f"[OK] Regularization preparation complete: {n_reg_targets} targets mapped")
             except Exception as e:
-                print(f"❌ Regularization preparation failed: {e}")
+                print(f"[ERROR] Regularization preparation failed: {e}")
                 print("   Disabling regularization and continuing with standard PMF")
                 self._reg_enabled = False
         
         # Check if regularization, robust mode, or weight-aware init is enabled - force single SA if needed
         use_batch_sa = USE_BATCH_SA
         if self._reg_enabled and USE_BATCH_SA:
-            print("⛓️ Regularization enabled: forcing single SA mode (BatchSA doesn't support proximal updates)")
+            print("[REG] Regularization enabled: forcing single SA mode (BatchSA doesn't support proximal updates)")
             use_batch_sa = False
         elif self.robust_fit and USE_BATCH_SA:
-            print("⚠️  Robust mode requested: forcing single SA mode (BatchSA doesn't support robust training)")
+            print("[WARN]  Robust mode requested: forcing single SA mode (BatchSA doesn't support robust training)")
             use_batch_sa = False
         elif self.weight_aware_init and self.species_weight_dict and USE_BATCH_SA:
-            print("🎯 Weight-aware initialization enabled: forcing single SA mode (BatchSA doesn't support custom initialization)")
+            print("[INIT] Weight-aware initialization enabled: forcing single SA mode (BatchSA doesn't support custom initialization)")
             use_batch_sa = False
         
         # Run PMF models
-        print(f"🔄 Running {self.models} PMF models with {self.factors} factors...")
+        print(f"[PROC] Running {self.models} PMF models with {self.factors} factors...")
         try:
             if use_batch_sa:
                 # Use BatchSA for multiple models
@@ -2106,7 +2368,7 @@ class MMFPMFAnalyzer:
                 best_idx = self.batch_models.best_model
                 self.best_model = self.batch_models.results[best_idx]
                 
-                print(f"✅ Best model: #{best_idx}")
+                print(f"[OK] Best model: #{best_idx}")
                 print(f"   Q(true): {self.best_model.Qtrue:.2f}")
                 print(f"   Q(robust): {self.best_model.Qrobust:.2f}")
                 
@@ -2122,20 +2384,20 @@ class MMFPMFAnalyzer:
             else:
                 # Use single SA model (manual implementation for regularization, robust mode, or weight-aware init)
                 if self._reg_enabled:
-                    print(f"⛓️ Running regularized PMF training with staged proximal updates")
-                    print(f"   → Regularizing {len(self._reg_plan)} species over {self.reg_bursts} bursts")
+                    print(f"[REG] Running regularized PMF training with staged proximal updates")
+                    print(f"   -> Regularizing {len(self._reg_plan)} species over {self.reg_bursts} bursts")
                 elif self.robust_fit:
-                    print(f"🔧 Running {self.models} SA models with ROBUST mode (alpha={self.robust_alpha})")
-                    print("   → Robust training will downweight outliers during optimization")
+                    print(f"[CONFIG] Running {self.models} SA models with ROBUST mode (alpha={self.robust_alpha})")
+                    print("   -> Robust training will downweight outliers during optimization")
                 elif self.weight_aware_init and self.species_weight_dict:
-                    print(f"🎯 Running {self.models} SA models with WEIGHT-AWARE initialization")
-                    print("   → Custom initialization accounts for species uncertainty weights")
+                    print(f"[INIT] Running {self.models} SA models with WEIGHT-AWARE initialization")
+                    print("   -> Custom initialization accounts for species uncertainty weights")
                 else:
-                    print(f"⚠️ Running {self.models} SA models (BatchSA not available or disabled)")
+                    print(f"[WARN] Running {self.models} SA models (BatchSA not available or disabled)")
                 
                 if self._reg_enabled:
                     # Regularized training: single model with staged proximal updates
-                    print(f"   🚀 Creating SA model for regularized training...")
+                    print(f"   [START] Creating SA model for regularized training...")
                     
                     sa_model = SA(
                         V=V, U=U, 
@@ -2152,12 +2414,13 @@ class MMFPMFAnalyzer:
                     regularization_success = self._train_with_regularization(sa_model, V, U, species_names)
                     
                     if not regularization_success:
-                        print(f"❌ Regularized training failed")
+                        print(f"[ERROR] Regularized training failed")
                         return False
                     
                     # Use the regularized model as the best model
                     best_model = sa_model
                     best_idx = 0
+                    best_q_robust = sa_model.Qrobust
                     
                 else:
                     # Run multiple SA models and select the best one (keep only best to save memory)
@@ -2166,7 +2429,7 @@ class MMFPMFAnalyzer:
                     best_idx = 0
                     
                     for model_idx in range(self.models):
-                        print(f"   🔄 Training model {model_idx + 1}/{self.models}...")
+                        print(f"   [PROC] Training model {model_idx + 1}/{self.models}...")
                         
                         # Create SA model with different seed for each run
                         model_seed = self.seed + model_idx if self.seed else None
@@ -2209,7 +2472,7 @@ class MMFPMFAnalyzer:
                 
                 self.batch_models = MockBatchSA(best_idx, best_model)
                 
-                print(f"✅ Best model: #{best_idx + 1} (Q(robust)={best_q_robust:.2f})")
+                print(f"[OK] Best model: #{best_idx + 1} (Q(robust)={best_q_robust:.2f})")
                 print(f"   Q(true): {self.best_model.Qtrue:.2f}")
                 print(f"   Q(robust): {self.best_model.Qrobust:.2f}")
             
@@ -2218,10 +2481,10 @@ class MMFPMFAnalyzer:
             
             # Initialize color manager for consistent plotting
             self.color_manager = ColorManager(self.factors, self.species_names)
-            print(f"🎨 Initialized consistent color scheme for {self.factors} factors and {len(self.species_names)} species")
+            print(f"[UI] Initialized consistent color scheme for {self.factors} factors and {len(self.species_names)} species")
             
         except Exception as e:
-            print(f"❌ PMF analysis failed: {e}")
+            print(f"[ERROR] PMF analysis failed: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -2253,7 +2516,7 @@ class MMFPMFAnalyzer:
             )
             return
         
-        print(f"🎯 Applying weight-aware initialization...")
+        print(f"[INIT] Applying weight-aware initialization...")
         
         # Create weight mapping for current species
         species_weights = np.ones(len(species_names))  # Default weight = 1
@@ -2333,7 +2596,7 @@ class MMFPMFAnalyzer:
             print(f"    H shape: {H.shape}, range: [{np.min(H):.6f}, {np.max(H):.6f}]")
             
         except Exception as e:
-            print(f"  ⚠️ Weight-aware initialization failed: {e}")
+            print(f"  [WARN] Weight-aware initialization failed: {e}")
             print(f"  Falling back to standard initialization")
             # Fallback to standard initialization
             sa_model.initialize(
@@ -2348,19 +2611,19 @@ class MMFPMFAnalyzer:
         """
         # Check if factors were explicitly set via CLI (not the default)
         if hasattr(self, 'user_specified_factors') and self.user_specified_factors:
-            print(f"🔢 Using user-specified number of factors: {self.factors}")
+            print(f"[NUMBERS] Using user-specified number of factors: {self.factors}")
             return
         
-        print("🔍 Optimizing number of factors...")
+        print("[SEARCH] Optimizing number of factors...")
         
         # Check if BatchSA is available (considering robust mode override)
         use_batch_for_optimization = USE_BATCH_SA and not self.robust_fit
         
         if not use_batch_for_optimization:
             if self.robust_fit:
-                print("⚠️ Skipping factor optimization (robust mode requires single SA)")
+                print("[WARN] Skipping factor optimization (robust mode requires single SA)")
             else:
-                print("⚠️ Skipping factor optimization (requires BatchSA)")
+                print("[WARN] Skipping factor optimization (requires BatchSA)")
             self.factors = 4  # Use default
             return
         
@@ -2371,7 +2634,7 @@ class MMFPMFAnalyzer:
         max_factors = min(getattr(self, 'max_factors', 10), species_limit)
         
         if max_factors < 2:
-            print(f"⚠️  Warning: Only {V.shape[1]} species available - using 2 factors minimum")
+            print(f"[WARN]  Warning: Only {V.shape[1]} species available - using 2 factors minimum")
             self.factors = 2
             return
             
@@ -2399,7 +2662,7 @@ class MMFPMFAnalyzer:
                 q_values[n_factors] = best_test.Qrobust
                 print(f"    Q(robust) = {best_test.Qrobust:.2f}")
             except Exception as e:
-                print(f"    ❌ Failed: {e}")
+                print(f"    [ERROR] Failed: {e}")
                 continue
         
         # Select optimal number of factors using EPA guidelines
@@ -2418,7 +2681,7 @@ class MMFPMFAnalyzer:
             # Select factor number with Q/DoF closest to 1.0 (EPA best practice)
             optimal_factors = min(q_dof_ratios.keys(), key=lambda nf: abs(q_dof_ratios[nf] - 1.0))
             self.factors = optimal_factors
-            print(f"📊 Optimal factors selected: {self.factors} (Q/DoF = {q_dof_ratios[optimal_factors]:.3f})")
+            print(f"[DATA] Optimal factors selected: {self.factors} (Q/DoF = {q_dof_ratios[optimal_factors]:.3f})")
             
             # Store optimization results for plotting
             self.optimization_q_values = q_values.copy()
@@ -2431,7 +2694,7 @@ class MMFPMFAnalyzer:
                 q_dof_ratio = q_dof_ratios.get(nf, float('inf'))
                 print(f"    {nf} factors: Q = {q_values[nf]:.2f}, Q/DoF = {q_dof_ratio:.3f}{marker}")
         else:
-            print("⚠️  Using default factor number: 4")
+            print("[WARN]  Using default factor number: 4")
             self.factors = 4
     
     def _interpret_q_values(self, q_true, q_robust, n_samples, n_species, n_factors):
@@ -2449,7 +2712,7 @@ class MMFPMFAnalyzer:
             dict: Interpretation results
         """
         # Calculate degrees of freedom
-        # DOF = (samples × species) - (samples × factors) - (species × factors) + factors²
+        # DOF = (samples × species) - (samples × factors) - (species × factors) + factors2
         dof = (n_samples * n_species) - (n_samples * n_factors) - (n_species * n_factors) + (n_factors * n_factors)
         
         # Theoretical expected Q for perfect fit
@@ -2503,7 +2766,7 @@ class MMFPMFAnalyzer:
         """
         Display Q-value interpretation in a user-friendly format.
         """
-        print("\n📊 Q-Value Analysis (EPA PMF Guidelines):")
+        print("\n[DATA] Q-Value Analysis (EPA PMF Guidelines):")
         print("=" * 50)
         print(f"Q(true): {interpretation['q_true']:.2f}")
         print(f"Q(robust): {interpretation['q_robust']:.2f}")
@@ -2533,7 +2796,7 @@ class MMFPMFAnalyzer:
         Create comprehensive PMF dashboard with seaborn styling.
         FIXED VERSION based on successful ESAT test.
         """
-        print("📊 Creating PMF dashboard...")
+        print("[DATA] Creating PMF dashboard...")
         
         # Suppress any potential matplotlib or numpy output during plotting
         import warnings
@@ -2542,7 +2805,7 @@ class MMFPMFAnalyzer:
         warnings.filterwarnings('ignore')  # Suppress warnings
         
         if not self.best_model:
-            print("❌ No model results available")
+            print("[ERROR] No model results available")
             return False
         
         # Create dashboard directory
@@ -2553,9 +2816,68 @@ class MMFPMFAnalyzer:
         F_profiles = self.best_model.H  # Factor profiles (source signatures)  
         G_contributions = self.best_model.W  # Factor contributions (time series)
         
-        print(f"📊 Creating plots...")
+        print(f"[DATA] Creating plots...")
         print(f"   Factor profiles: {F_profiles.shape}")
         print(f"   Factor contributions: {G_contributions.shape}")
+        
+        # Save factor profiles (H matrix) for analysis
+        try:
+            factor_profiles_file = self.output_dir / f"{self.filename_prefix}_factor_profiles.csv"
+            factor_names = [f"Factor_{i+1}" for i in range(F_profiles.shape[0])]
+            
+            profiles_df = pd.DataFrame(
+                F_profiles, 
+                index=factor_names, 
+                columns=self.species_names
+            )
+            
+            profiles_df.to_csv(factor_profiles_file, index=True)
+            print(f"[SAVE] Saved factor profiles: {factor_profiles_file.name}")
+        except Exception as e:
+            print(f"[WARN] Could not save factor profiles: {e}")
+        
+        # Compute and save closure metrics for mass balance analysis
+        try:
+            print("   [CLOSURE] Computing species-level closure metrics...")
+            
+            # Load original concentration and uncertainty data
+            conc_file = self.output_dir / f"{self.filename_prefix}_concentrations.csv"
+            unc_file = self.output_dir / f"{self.filename_prefix}_uncertainties.csv"
+            
+            conc_df = pd.read_csv(conc_file, index_col=0)
+            unc_df = pd.read_csv(unc_file, index_col=0)
+            
+            V = conc_df.values  # (n_samples, n_species)
+            U = unc_df.values   # (n_samples, n_species)
+            
+            # Compute closure metrics
+            closure_df, group_summary = self._compute_closure_metrics(
+                V, U, G_contributions, F_profiles, self.species_names
+            )
+            
+            # Save closure metrics CSV
+            closure_file = self.output_dir / f"{self.filename_prefix}_closure_summary.csv"
+            closure_df.to_csv(closure_file, index=False)
+            print(f"[SAVE] Saved closure summary: {closure_file.name}")
+            
+            # Create closure plot
+            try:
+                closure_plot = self._plot_closure_summary(closure_df, group_summary, dashboard_dir)
+                plot_files.append(closure_plot)
+                print(f"   [OK] Saved: closure_summary.png")
+            except NameError:
+                # plot_files not available in this scope, create it
+                closure_plot = self._plot_closure_summary(closure_df, group_summary, dashboard_dir)
+                print(f"   [OK] Saved: closure_summary.png")
+            
+            # Store closure data for HTML dashboard
+            self._closure_df = closure_df
+            self._group_summary = group_summary
+            
+        except Exception as e:
+            print(f"[WARN] Could not compute closure metrics: {e}")
+            self._closure_df = None
+            self._group_summary = None
         
         
         # Create basic PMF plots
@@ -2599,7 +2921,7 @@ class MMFPMFAnalyzer:
                 
                 ax.set_title(f'Factor {i+1}', fontweight='bold', fontsize=12)
                 ax.set_xlabel('Species', fontsize=10)
-                ax.set_ylabel('Contribution (μg/m³)', fontsize=10)
+                ax.set_ylabel('Contribution (ug/m3)', fontsize=10)
                 ax.set_xticks(range(len(self.species_names)))
                 ax.set_xticklabels(self.species_names, rotation=45, ha='right', fontsize=8)
                 ax.grid(True, alpha=0.3)
@@ -2621,10 +2943,10 @@ class MMFPMFAnalyzer:
             plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
             plt.close()
             plot_files.append(plot_path)
-            print(f"   ✅ Saved: factor_profiles.png")
+            print(f"   [OK] Saved: factor_profiles.png")
             
         except Exception as e:
-            print(f"   ❌ Error creating factor profiles: {e}")
+            print(f"   [ERROR] Error creating factor profiles: {e}")
         
         # New: Relative (composition) profiles per factor for scale-invariant view
         try:
@@ -2674,9 +2996,9 @@ class MMFPMFAnalyzer:
             plt.savefig(plot_path_rel, dpi=300, bbox_inches='tight', facecolor='white')
             plt.close()
             plot_files.append(plot_path_rel)
-            print(f"   ✅ Saved: factor_profiles_relative.png")
+            print(f"   [OK] Saved: factor_profiles_relative.png")
         except Exception as e:
-            print(f"   ❌ Error creating relative factor profiles: {e}")
+            print(f"   [ERROR] Error creating relative factor profiles: {e}")
         
         try:
             # Plot 2: Factor Contributions Time Series
@@ -2727,10 +3049,10 @@ class MMFPMFAnalyzer:
             plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
             plt.close()
             plot_files.append(plot_path)
-            print(f"   ✅ Saved: factor_contributions.png")
+            print(f"   [OK] Saved: factor_contributions.png")
             
         except Exception as e:
-            print(f"   ❌ Error creating factor contributions: {e}")
+            print(f"   [ERROR] Error creating factor contributions: {e}")
         
         try:
             # Plot 3: Species Composition (Stacked Bar)
@@ -2757,10 +3079,10 @@ class MMFPMFAnalyzer:
             plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
             plt.close()
             plot_files.append(plot_path)
-            print(f"   ✅ Saved: species_composition.png")
+            print(f"   [OK] Saved: species_composition.png")
             
         except Exception as e:
-            print(f"   ❌ Error creating species composition: {e}")
+            print(f"   [ERROR] Error creating species composition: {e}")
         
         try:
             # Plot 4: Model Quality Assessment
@@ -2796,112 +3118,112 @@ class MMFPMFAnalyzer:
             plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
             plt.close()
             plot_files.append(plot_path)
-            print(f"   ✅ Saved: model_quality.png")
+            print(f"   [OK] Saved: model_quality.png")
             
         except Exception as e:
-            print(f"   ❌ Error creating model quality plot: {e}")
+            print(f"   [ERROR] Error creating model quality plot: {e}")
         
         # Plot 5: Residual Analysis (EPA recommended)
         try:
             self._create_residual_plots(dashboard_dir, plot_files, F_profiles, G_contributions)
         except Exception as e:
-            print(f"   ❌ Error creating residual plots: {e}")
+            print(f"   [ERROR] Error creating residual plots: {e}")
         
         # Plot 6: Factor Correlation Analysis
         try:
             self._create_correlation_plots(dashboard_dir, plot_files, F_profiles, G_contributions)
         except Exception as e:
-            print(f"   ❌ Error creating correlation plots: {e}")
+            print(f"   [ERROR] Error creating correlation plots: {e}")
         
         # Plot 7: Source Contribution Analysis
         try:
             self._create_source_contribution_plots(dashboard_dir, plot_files, F_profiles, G_contributions)
         except Exception as e:
-            print(f"   ❌ Error creating source contribution plots: {e}")
+            print(f"   [ERROR] Error creating source contribution plots: {e}")
         
         # Plot 8: Seasonal/Temporal Analysis
         try:
             self._create_temporal_analysis_plots(dashboard_dir, plot_files, G_contributions)
         except Exception as e:
-            print(f"   ❌ Error creating temporal analysis plots: {e}")
+            print(f"   [ERROR] Error creating temporal analysis plots: {e}")
         
         # Plot 9: Bootstrap/Uncertainty Analysis (if multiple models)
         try:
             self._create_uncertainty_plots(dashboard_dir, plot_files, F_profiles, G_contributions)
         except Exception as e:
-            print(f"   ❌ Error creating uncertainty plots: {e}")
+            print(f"   [ERROR] Error creating uncertainty plots: {e}")
         
         # Plot 10: Diagnostic Scatter Plots
         try:
             self._create_diagnostic_scatters(dashboard_dir, plot_files, F_profiles, G_contributions)
         except Exception as e:
-            print(f"   ❌ Error creating diagnostic scatter plots: {e}")
+            print(f"   [ERROR] Error creating diagnostic scatter plots: {e}")
         
         # Plot 11: Factor Optimization Plot (Q vs Factors)
         try:
             self._create_optimization_plot(dashboard_dir, plot_files)
         except Exception as e:
-            print(f"   ❌ Error creating optimization plot: {e}")
+            print(f"   [ERROR] Error creating optimization plot: {e}")
         
         # Plot 12: Wind Direction and Speed Analysis
         try:
             self._create_wind_analysis_plots(dashboard_dir, plot_files, G_contributions)
         except Exception as e:
-            print(f"   ❌ Error creating wind analysis plots: {e}")
+            print(f"   [ERROR] Error creating wind analysis plots: {e}")
         
         # Plot 13: Temperature Analysis
         try:
             self._create_temperature_analysis_plots(dashboard_dir, plot_files, G_contributions)
         except Exception as e:
-            print(f"   ❌ Error creating temperature analysis plots: {e}")
+            print(f"   [ERROR] Error creating temperature analysis plots: {e}")
         
         # Plot 14: Pressure Analysis
         try:
             self._create_pressure_analysis_plots(dashboard_dir, plot_files, G_contributions)
         except Exception as e:
-            print(f"   ❌ Error creating pressure analysis plots: {e}")
+            print(f"   [ERROR] Error creating pressure analysis plots: {e}")
         
-        # Plot 15: Sankey Diagram (Factors → Species)
+        # Plot 15: Sankey Diagram (Factors -> Species)
         try:
             self._create_sankey_diagram(dashboard_dir, plot_files, F_profiles, G_contributions)
         except Exception as e:
-            print(f"   ❌ Error creating Sankey diagram: {e}")
+            print(f"   [ERROR] Error creating Sankey diagram: {e}")
         
         # NEW S/N Categorization and EPA Analysis Plots
         if self.snr_enable and hasattr(self, '_snr_categories'):
             try:
                 self._create_snr_analysis_plots(dashboard_dir, plot_files)
             except Exception as e:
-                print(f"   ❌ Error creating S/N analysis plots: {e}")
+                print(f"   [ERROR] Error creating S/N analysis plots: {e}")
         
         # Plot 16: PCA vs PMF Comparison Plots (if PCA has been run)
         try:
             self._create_pca_comparison_plots(dashboard_dir, plot_files)
         except Exception as e:
-            print(f"   ❌ Error creating PCA comparison plots: {e}")
+            print(f"   [ERROR] Error creating PCA comparison plots: {e}")
         
         # Plot 17: PCA Loadings Plots (if PCA has been run)
         try:
             self._create_pca_loadings_plot(dashboard_dir, plot_files)
         except Exception as e:
-            print(f"   ❌ Error creating PCA loadings plots: {e}")
+            print(f"   [ERROR] Error creating PCA loadings plots: {e}")
         
         # Generate factor structure diagnostics summary
         try:
             self._generate_factor_structure_summary()
         except Exception as e:
-            print(f"   ⚠️ Error generating factor structure summary: {e}")
+            print(f"   [WARN] Error generating factor structure summary: {e}")
         
         # Create summary dashboard HTML
         self._create_html_dashboard(plot_files)
         
-        print(f"📊 Dashboard complete: {len(plot_files)} plots generated")
+        print(f"[DATA] Dashboard complete: {len(plot_files)} plots generated")
     
     def _create_snr_analysis_plots(self, dashboard_dir, plot_files):
         """
         Create comprehensive S/N categorization analysis plots and summaries.
         """
-        print("   🔢 Creating S/N categorization analysis plots...")
+        print("   [NUMBERS] Creating S/N categorization analysis plots...")
         
         # Define consistent category colors
         category_colors = {
@@ -2915,7 +3237,7 @@ class MMFPMFAnalyzer:
         categories_file = self.output_dir / f"{self.filename_prefix}_species_categories.csv"
         
         if not snr_metrics_file.exists():
-            print("   ⚠️ S/N metrics file not found, skipping S/N plots")
+            print("   [WARN] S/N metrics file not found, skipping S/N plots")
             return
         
         snr_metrics = pd.read_csv(snr_metrics_file)
@@ -2990,8 +3312,8 @@ class MMFPMFAnalyzer:
             ax3.set_xscale('log')
             ax3.set_yscale('log')
             ax3.set_title('Mean Concentration vs Mean Uncertainty')
-            ax3.set_xlabel('Mean Concentration (μg/m³)')
-            ax3.set_ylabel('Mean Uncertainty (μg/m³)')
+            ax3.set_xlabel('Mean Concentration (ug/m3)')
+            ax3.set_ylabel('Mean Uncertainty (ug/m3)')
             ax3.legend()
             ax3.grid(True, alpha=0.3)
         
@@ -3015,7 +3337,7 @@ class MMFPMFAnalyzer:
                     patch.set_alpha(0.7)
                 
                 ax4.set_title('Uncertainty Distributions by Species')
-                ax4.set_ylabel('Uncertainty (μg/m³)')
+                ax4.set_ylabel('Uncertainty (ug/m3)')
                 ax4.set_yscale('log')
                 plt.setp(ax4.get_xticklabels(), rotation=45, ha='right')
                 ax4.grid(True, alpha=0.3)
@@ -3085,7 +3407,7 @@ class MMFPMFAnalyzer:
         plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
         plt.close()
         plot_files.append(plot_path)
-        print(f"   ✅ Saved: snr_analysis.png")
+        print(f"   [OK] Saved: snr_analysis.png")
     
     def _get_cli_flags_html_section(self):
         """
@@ -3138,7 +3460,7 @@ class MMFPMFAnalyzer:
         
         html_section = """
             <div class="cli-section">
-                <h2>📋 CLI Flags Used (Reproducibility Record)</h2>
+                <h2>[INFO] CLI Flags Used (Reproducibility Record)</h2>
                 <p><strong>Command to reproduce this analysis:</strong></p>
                 <pre style="background-color: #f8f8f8; padding: 10px; border-radius: 3px; overflow-x: auto;">
         """
@@ -3182,6 +3504,13 @@ class MMFPMFAnalyzer:
         if hasattr(self, '_excluded_species_applied') and self._excluded_species_applied:
             for species in self._excluded_species_applied:
                 cmd_parts.append(f'--exclude-species {species}')
+        
+        # Add regularization parameters
+        if hasattr(self, '_reg_enabled') and self._reg_enabled and hasattr(self, '_reg_plan'):
+            for reg_item in self._reg_plan:
+                cmd_parts.append(f'--reg-species {reg_item["species"]}')
+                cmd_parts.append(f'--reg-lambda {reg_item["lambda"]}')
+                cmd_parts.append(f'--reg-template {reg_item["template_type"]}')
         
         # Add other non-default parameters
         non_defaults = {
@@ -3291,7 +3620,7 @@ class MMFPMFAnalyzer:
             </div>
             
             <div class="config-section">
-                <h2>🔧 Run Configuration</h2>
+                <h2>[CONFIG] Run Configuration</h2>
                 <ul>
                     <li><strong>Uncertainty Mode:</strong> {self.uncertainty_mode} 
                         {('(EPA PMF 5.0 formulas)' if self.uncertainty_mode == 'epa' else '(Fixed MDL/EF table)')}</li>
@@ -3311,9 +3640,9 @@ class MMFPMFAnalyzer:
         if self.uncertainty_mode == 'epa':
             html_content += f"""
             <div class="epa-section">
-                <h2>🏧 EPA Uncertainty Policy (PMF 5.0)</h2>
+                <h2>[EMOJI] EPA Uncertainty Policy (PMF 5.0)</h2>
                 <ul>
-                    <li><strong>Above MDL:</strong> U = √((EF × conc)² + (0.5 × MDL)²)</li>
+                    <li><strong>Above MDL:</strong> U = √((EF × conc)2 + (0.5 × MDL)2)</li>
                     <li><strong>BDL Cases:</strong> V = MDL/2, U = {self.uncertainty_bdl_policy.replace('-', ' ').title()}</li>
                     <li><strong>Missing Cases:</strong> V = species median (fallback MDL), U = 4 × median (fallback 4 × MDL)</li>
                     <li><strong>EF/MDL Source:</strong> {'Built-in database' if not self.uncertainty_ef_mdl else f'Custom CSV: {self.uncertainty_ef_mdl}'}</li>
@@ -3324,10 +3653,10 @@ class MMFPMFAnalyzer:
         else:
             html_content += f"""
             <div class="epa-section">
-                <h2>🏧 Legacy Uncertainty Policy</h2>
+                <h2>[EMOJI] Legacy Uncertainty Policy</h2>
                 <ul>
                     <li><strong>Method:</strong> Fixed MDL/Error Fraction table</li>
-                    <li><strong>Above MDL:</strong> U = √((EF × conc)² + MDL²)</li>
+                    <li><strong>Above MDL:</strong> U = √((EF × conc)2 + MDL2)</li>
                     <li><strong>BDL/Missing:</strong> V = MDL/2, U = (5/6) × MDL</li>
                     <li><strong>Minimum Uncertainty:</strong> {self.legacy_min_u}</li>
                     <li><strong>Aggregation Scaling:</strong> Applied as 1/√n after uncertainty calculation</li>
@@ -3350,7 +3679,7 @@ class MMFPMFAnalyzer:
             
             html_content += f"""
             <div class="snr-section">
-                <h2>🔢 S/N Categorization Summary (EPA PMF 5.0)</h2>
+                <h2>[NUMBERS] S/N Categorization Summary (EPA PMF 5.0)</h2>
                 <ul>
                     <li><strong>Total Species:</strong> {len(self._snr_categories)}</li>
                     <li><strong>Average S/N:</strong> {avg_snr:.3f}</li>
@@ -3405,7 +3734,7 @@ class MMFPMFAnalyzer:
         if hasattr(self, '_species_weights_applied') and self._species_weights_applied:
             html_content += f"""
             <div class="epa-section">
-                <h2>⚖️ Species Uncertainty Weighting</h2>
+                <h2>[SYMBOL]️ Species Uncertainty Weighting</h2>
                 <p>The following species had their uncertainties multiplied to downweight them in the PMF objective function:</p>
                 <table>
                     <tr><th>Species</th><th>Uncertainty Multiplier</th><th>Effect</th></tr>
@@ -3431,7 +3760,7 @@ class MMFPMFAnalyzer:
         if hasattr(self, '_excluded_species_applied') and self._excluded_species_applied:
             html_content += f"""
             <div class="epa-section">
-                <h2>🚫 Species Exclusions</h2>
+                <h2>[EMOJI] Species Exclusions</h2>
                 <p>The following species were completely removed from PMF analysis via the --exclude-species flag:</p>
                 <table>
                     <tr><th>Species</th><th>Reason</th></tr>
@@ -3458,6 +3787,81 @@ class MMFPMFAnalyzer:
             html_content += """
                 </table>
                 <p><small><em>Note: Excluded species are completely removed from concentration and uncertainty matrices before PMF analysis.</em></small></p>
+            </div>
+            """
+        
+        # Add regularization section if regularization was used
+        if hasattr(self, '_reg_enabled') and self._reg_enabled and hasattr(self, '_reg_plan'):
+            html_content += f"""
+            <div class="epa-section">
+                <h2>[REG] Species Regularization Applied</h2>
+                <p><strong>Regularization Mode:</strong> Ridge regularization with zero template for species push-out</p>
+                <table>
+                    <tr><th>Species</th><th>Lambda (λ)</th><th>Template</th><th>Effect</th></tr>
+            """
+            
+            for reg_item in self._reg_plan:
+                species = reg_item['species']
+                lambda_val = reg_item['lambda']
+                template_type = reg_item.get('template_type', 'zero')
+                html_content += f"""
+                    <tr>
+                        <td><strong>{species}</strong></td>
+                        <td>{lambda_val}</td>
+                        <td>{template_type.title()}</td>
+                        <td>Push-out (minimize {species} factor loadings)</td>
+                    </tr>
+                """
+            
+            # Check if convergence info is available
+            convergence_info = "Not available"
+            if hasattr(self, '_reg_burst_diagnostics') and self._reg_burst_diagnostics:
+                final_burst = self._reg_burst_diagnostics[-1]
+                max_rel_change = final_burst.get('max_rel_change', 0)
+                converged = max_rel_change < getattr(self, 'reg_tol', 0.0001)
+                convergence_info = f"{'Converged' if converged else 'Not converged'} (final rel_change={max_rel_change:.3e})"
+            
+            html_content += f"""
+                </table>
+                <p><strong>Convergence Status:</strong> {convergence_info}</p>
+                <p><strong>Method:</strong> Staged training with {getattr(self, 'reg_bursts', 5)} bursts of {getattr(self, 'reg_iter_per_burst', 50)} iterations each</p>
+                <p><strong>Mathematical Approach:</strong> Ridge regularization with proximal updates - min ||V-WH||² + λ||H[:,species]-template||²</p>
+            </div>
+            """
+        
+        # Add closure metrics section if available
+        if hasattr(self, '_closure_df') and self._closure_df is not None:
+            html_content += f"""
+            <div class="epa-section">
+                <h2>[CLOSURE] Mass Closure / Fit Divergence Analysis</h2>
+                <p><strong>Purpose:</strong> Quantify how well the PMF model reconstructs measured concentrations (closure) and identify species where regularization affects fit quality.</p>
+            """
+            
+            # Add group closure summary
+            if hasattr(self, '_group_summary') and self._group_summary:
+                html_content += "<h3>Group-Level Closure:</h3><ul>"
+                for group, data in self._group_summary.items():
+                    html_content += f"<li><strong>{group}:</strong> {data['closure_pct']:.1f}% ({data['n_species']} species)</li>"
+                html_content += "</ul>"
+            
+            # Add regularization context if active
+            if hasattr(self, '_reg_enabled') and self._reg_enabled and hasattr(self, '_reg_plan'):
+                reg_species = [ri['species'] for ri in self._reg_plan]
+                reg_species_str = ', '.join(reg_species)
+                html_content += f"""
+                <p><strong>Regularization Impact:</strong> {reg_species_str} closure may decrease as lambda (λ) increases due to push-out regularization forcing smaller factor loadings.</p>
+                """
+            
+            # Add interpretation guide
+            html_content += f"""
+                <h3>Interpretation Guide:</h3>
+                <ul>
+                    <li><strong>Closure %:</strong> (Reconstructed Sum / Measured Sum) × 100. Values near 100% indicate good fit.</li>
+                    <li><strong>Weighted Closure %:</strong> Same calculation but weighted by 1/uncertainty². More robust to outliers.</li>
+                    <li><strong>Red bars:</strong> Regularized species (expected to show closure reduction as λ increases).</li>
+                    <li><strong>Q Share %:</strong> Fraction of total model Q contributed by each species (indicates fit difficulty).</li>
+                </ul>
+                <p><strong>Files:</strong> See <code>{self.filename_prefix}_closure_summary.csv</code> for detailed per-species metrics.</p>
             </div>
             """
         
@@ -3524,12 +3928,12 @@ class MMFPMFAnalyzer:
         with open(html_file, 'w', encoding='utf-8') as f:
             f.write(html_content)
         
-        print(f"📄 HTML Dashboard: {html_file}")
+        print(f"[FILE] HTML Dashboard: {html_file}")
     
     def generate_report(self):
         """Generate comprehensive PMF analysis report."""
         if not self.best_model:
-            print("❌ No PMF model available for report generation")
+            print("[ERROR] No PMF model available for report generation")
             return
             
         report_path = self.output_dir / f"{self.filename_prefix}_pmf_report.md"
@@ -3578,11 +3982,11 @@ class MMFPMFAnalyzer:
 
 ## Quality Assurance
 This analysis follows EPA PMF 5.0 User Guide best practices:
-- ✅ Appropriate uncertainty estimation using EPA formula
-- ✅ Missing value treatment using EPA Method 1
-- ✅ Batch modeling with {self.models} runs for robustness
-- ✅ Comprehensive diagnostic plots generated
-- ✅ ESAT Rust-optimized PMF implementation
+- [OK] Appropriate uncertainty estimation using EPA formula
+- [OK] Missing value treatment using EPA Method 1
+- [OK] Batch modeling with {self.models} runs for robustness
+- [OK] Comprehensive diagnostic plots generated
+- [OK] ESAT Rust-optimized PMF implementation
 
 ## Technical Notes
 - Used ESAT library with Rust-accelerated computations
@@ -3597,11 +4001,11 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
 4. Consider seasonal analysis if data span is sufficient
 """)
         
-        print(f"📄 Analysis report: {report_path}")
+        print(f"[FILE] Analysis report: {report_path}")
     
     def _create_residual_plots(self, dashboard_dir, plot_files, F_profiles, G_contributions):
         """Create residual analysis plots (EPA recommended)."""
-        print("   🔍 Creating residual analysis plots...")
+        print("   [SEARCH] Creating residual analysis plots...")
         
         # Reconstruct the original data from PMF results
         reconstructed = G_contributions @ F_profiles
@@ -3664,11 +4068,11 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
         plt.close()
         plot_files.append(plot_path)
-        print(f"   ✅ Saved: residual_analysis.png")
+        print(f"   [OK] Saved: residual_analysis.png")
     
     def _create_correlation_plots(self, dashboard_dir, plot_files, F_profiles, G_contributions):
         """Create factor correlation analysis plots."""
-        print("   🔗 Creating correlation analysis plots...")
+        print("   [LINK] Creating correlation analysis plots...")
         
         fig, axes = plt.subplots(2, 2, figsize=(15, 12))
         fig.suptitle(f'{self.station} PMF Factor Correlation Analysis', fontsize=16, fontweight='bold')
@@ -3733,11 +4137,11 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
         plt.close()
         plot_files.append(plot_path)
-        print(f"   ✅ Saved: correlation_analysis.png")
+        print(f"   [OK] Saved: correlation_analysis.png")
     
     def _create_source_contribution_plots(self, dashboard_dir, plot_files, F_profiles, G_contributions):
         """Create source contribution analysis plots."""
-        print("   📊 Creating source contribution plots...")
+        print("   [DATA] Creating source contribution plots...")
         
         fig, axes = plt.subplots(2, 2, figsize=(15, 12))
         fig.suptitle(f'{self.station} PMF Source Contribution Analysis', fontsize=16, fontweight='bold')
@@ -3823,11 +4227,11 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
         plt.close()
         plot_files.append(plot_path)
-        print(f"   ✅ Saved: source_contribution_analysis.png")
+        print(f"   [OK] Saved: source_contribution_analysis.png")
     
     def _create_temporal_analysis_plots(self, dashboard_dir, plot_files, G_contributions):
         """Create temporal pattern analysis plots."""
-        print("   ⏰ Creating temporal analysis plots...")
+        print("   [TIME] Creating temporal analysis plots...")
         
         # Try to get actual datetime information
         conc_file = self.output_dir / f"{self.filename_prefix}_concentrations.csv"
@@ -3951,14 +4355,14 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
         plt.close()
         plot_files.append(plot_path)
-        print(f"   ✅ Saved: temporal_analysis.png")
+        print(f"   [OK] Saved: temporal_analysis.png")
     
     def _create_uncertainty_plots(self, dashboard_dir, plot_files, F_profiles, G_contributions):
         """Create uncertainty and bootstrap analysis plots."""
-        print("   🎯 Creating uncertainty analysis plots...")
+        print("   [INIT] Creating uncertainty analysis plots...")
         
         if not USE_BATCH_SA or len(self.batch_models.results) < 5:
-            print("   ⚠️ Skipping uncertainty plots (requires multiple models)")
+            print("   [WARN] Skipping uncertainty plots (requires multiple models)")
             return
         
         fig, axes = plt.subplots(2, 2, figsize=(15, 12))
@@ -4085,11 +4489,11 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
         plt.close()
         plot_files.append(plot_path)
-        print(f"   ✅ Saved: uncertainty_analysis.png")
+        print(f"   [OK] Saved: uncertainty_analysis.png")
     
     def _create_diagnostic_scatters(self, dashboard_dir, plot_files, F_profiles, G_contributions):
         """Create diagnostic scatter plots for model validation."""
-        print("   🔬 Creating diagnostic scatter plots...")
+        print("   [ANALYSIS] Creating diagnostic scatter plots...")
         
         fig, axes = plt.subplots(2, 2, figsize=(15, 12))
         fig.suptitle(f'{self.station} PMF Diagnostic Scatter Plots', fontsize=16, fontweight='bold')
@@ -4112,13 +4516,13 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         max_val = max(np.max(original_data), np.max(reconstructed))
         ax1.plot([min_val, max_val], [min_val, max_val], 'r--', linewidth=2, alpha=0.8)
         
-        # Calculate R²
+        # Calculate R2
         from sklearn.metrics import r2_score
         r2 = r2_score(original_data.flatten(), reconstructed.flatten())
         
         ax1.set_xlabel('Observed Concentration')
         ax1.set_ylabel('Predicted Concentration')
-        ax1.set_title(f'Observed vs Predicted (R² = {r2:.3f})')
+        ax1.set_title(f'Observed vs Predicted (R2 = {r2:.3f})')
         ax1.grid(True, alpha=0.3)
         
         # Plot 2: Standardized residuals
@@ -4162,7 +4566,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         
         bars = ax3.bar(range(len(self.species_names)), species_r2, alpha=0.7)
         
-        # Color bars by R² quality
+        # Color bars by R2 quality
         for i, (bar, r2_val) in enumerate(zip(bars, species_r2)):
             if r2_val >= 0.8:
                 bar.set_color('green')
@@ -4171,13 +4575,13 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
             else:
                 bar.set_color('red')
             
-            # Add R² value on top of bar (only for non-negative values)
+            # Add R2 value on top of bar (only for non-negative values)
             if r2_val >= 0:
                 ax3.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.01,
                         f'{r2_val:.2f}', ha='center', va='bottom', fontsize=8)
         
-        ax3.set_title('Species-Specific Model Performance (R²)')
-        ax3.set_ylabel('R² Value')
+        ax3.set_title('Species-Specific Model Performance (R2)')
+        ax3.set_ylabel('R2 Value')
         ax3.set_xticks(range(len(self.species_names)))
         ax3.set_xticklabels(self.species_names, rotation=45, ha='right')
         ax3.set_ylim(0, 1.1)
@@ -4224,15 +4628,15 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
         plt.close()
         plot_files.append(plot_path)
-        print(f"   ✅ Saved: diagnostic_scatters.png")
+        print(f"   [OK] Saved: diagnostic_scatters.png")
     
     def _create_optimization_plot(self, dashboard_dir, plot_files):
         """Create enhanced Q(robust) vs number of factors optimization plot with EPA reference lines."""
-        print("   🔢 Creating factor optimization plot...")
+        print("   [NUMBERS] Creating factor optimization plot...")
         
         # Check if optimization data is available
         if not hasattr(self, 'optimization_q_values') or not self.optimization_q_values:
-            print("   ⚠️ No optimization data available - skipping optimization plot")
+            print("   [WARN] No optimization data available - skipping optimization plot")
             return
         
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
@@ -4352,7 +4756,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
         plt.close()
         plot_files.append(plot_path)
-        print(f"   ✅ Saved: optimization_q_vs_factors.png")
+        print(f"   [OK] Saved: optimization_q_vs_factors.png")
     
     def _varimax_rotation(self, loadings, gamma=1.0, max_iter=100, tol=1e-6):
         """
@@ -4397,15 +4801,15 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         Run Principal Component Analysis on the concentration data.
         This provides a comparison to PMF using traditional variance-based decomposition.
         """
-        print("🔬 Starting PCA analysis...")
+        print("[ANALYSIS] Starting PCA analysis...")
         
         # Load processed concentration data (same as used for PMF)
         conc_file = self.output_dir / f"{self.filename_prefix}_concentrations.csv"
         if not conc_file.exists():
-            print("❌ No concentration data found. Run PMF analysis first.")
+            print("[ERROR] No concentration data found. Run PMF analysis first.")
             return False
         
-        print("📊 Loading concentration data for PCA...")
+        print("[DATA] Loading concentration data for PCA...")
         conc_df = pd.read_csv(conc_file, index_col=0)
         
         # Remove any remaining NaN values
@@ -4413,11 +4817,11 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         if len(conc_clean) != len(conc_df):
             print(f"   Removed {len(conc_df) - len(conc_clean)} rows with missing values")
         
-        print(f"📊 PCA data matrix: {conc_clean.shape}")
-        print(f"📋 Species: {', '.join(conc_clean.columns)}")
+        print(f"[DATA] PCA data matrix: {conc_clean.shape}")
+        print(f"[INFO] Species: {', '.join(conc_clean.columns)}")
         
         # Step 1: Data Standardization (CRITICAL for PCA)
-        print("🎯 Standardizing data (Z-score transformation)...")
+        print("[INIT] Standardizing data (Z-score transformation)...")
         self.pca_scaler = StandardScaler()
         X_scaled = self.pca_scaler.fit_transform(conc_clean)
         
@@ -4431,10 +4835,10 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         # Step 2: Determine optimal number of components
         # Use same number as PMF factors for direct comparison
         n_components = self.factors
-        print(f"🔢 Using {n_components} components (matching PMF factors)")
+        print(f"[NUMBERS] Using {n_components} components (matching PMF factors)")
         
         # Step 3: Perform PCA
-        print("⚙️ Performing PCA...")
+        print("[SYMBOL]️ Performing PCA...")
         self.pca_model = PCA(n_components=n_components, random_state=self.seed)
         pca_scores = self.pca_model.fit_transform(X_scaled)
         pca_loadings = self.pca_model.components_.T  # Transpose to get species × components
@@ -4442,7 +4846,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         # Store explained variance
         self.pca_explained_variance = self.pca_model.explained_variance_ratio_
         
-        print(f"📊 PCA Results:")
+        print(f"[DATA] PCA Results:")
         print(f"   Components shape: {pca_loadings.shape}")
         print(f"   Scores shape: {pca_scores.shape}")
         print(f"   Total variance explained: {np.sum(self.pca_explained_variance):.1%}")
@@ -4450,7 +4854,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
             print(f"     PC{i+1}: {var:.1%}")
         
         # Step 4: Varimax Rotation for interpretability
-        print("🔄 Applying Varimax rotation for interpretability...")
+        print("[PROC] Applying Varimax rotation for interpretability...")
         rotated_loadings, rotation_matrix = self._varimax_rotation(pca_loadings)
         
         # Apply same rotation to scores
@@ -4480,8 +4884,8 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         )
         scores_df.to_csv(pca_scores_file)
         
-        print(f"💾 Saved PCA loadings: {pca_loadings_file}")
-        print(f"💾 Saved PCA scores: {pca_scores_file}")
+        print(f"[SAVE] Saved PCA loadings: {pca_loadings_file}")
+        print(f"[SAVE] Saved PCA scores: {pca_scores_file}")
         
         return True
     
@@ -4490,10 +4894,10 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         Create comparative plots between PMF and PCA results.
         This includes side-by-side profiles, correlation analysis, and method comparison.
         """
-        print("   🅰 Creating PCA vs PMF comparison plots...")
+        print("   [A] Creating PCA vs PMF comparison plots...")
         
         if not hasattr(self, 'pca_loadings') or self.pca_loadings is None:
-            print("   ⚠️ No PCA results found - skipping comparison plots")
+            print("   [WARN] No PCA results found - skipping comparison plots")
             return
         
         # Get PMF results
@@ -4686,7 +5090,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
         plt.close()
         plot_files.append(plot_path)
-        print(f"   ✅ Saved: pca_pmf_comparison.png")
+        print(f"   [OK] Saved: pca_pmf_comparison.png")
         
         # Additional detailed comparison plot
         self._create_detailed_profile_comparison(dashboard_dir, plot_files, F_profiles)
@@ -4695,7 +5099,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         """
         Create detailed side-by-side profile comparison for all factors/components.
         """
-        print("   🔍 Creating detailed profile comparison plots...")
+        print("   [SEARCH] Creating detailed profile comparison plots...")
         
         # Create subplot layout based on number of factors
         if self.factors <= 4:
@@ -4757,16 +5161,16 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
         plt.close()
         plot_files.append(plot_path)
-        print(f"   ✅ Saved: detailed_profile_comparison.png")
+        print(f"   [OK] Saved: detailed_profile_comparison.png")
     
     def _create_pca_loadings_plot(self, dashboard_dir, plot_files):
         """
         Create dedicated PCA loadings plots at the end of analysis when PCA is run.
         """
-        print("   📊 Creating PCA loadings plots...")
+        print("   [DATA] Creating PCA loadings plots...")
         
         if not hasattr(self, 'pca_loadings') or self.pca_loadings is None:
-            print("   ⚠️ No PCA results found - skipping PCA loadings plots")
+            print("   [WARN] No PCA results found - skipping PCA loadings plots")
             return
         
         # Calculate optimal subplot layout for PCA components
@@ -4823,7 +5227,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
         plt.close()
         plot_files.append(plot_path)
-        print(f"   ✅ Saved: pca_loadings.png")
+        print(f"   [OK] Saved: pca_loadings.png")
     
     def _generate_factor_structure_summary(self):
         """Generate factor structure diagnostics for model validation.
@@ -4834,7 +5238,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         if not self.best_model:
             return
         
-        print("📊 Generating factor structure diagnostics...")
+        print("[DATA] Generating factor structure diagnostics...")
         
         # Get factor profiles (H) and contributions (W) from ESAT model
         # H shape: (n_factors, n_species), W shape: (n_samples, n_factors)
@@ -4842,7 +5246,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         G_contributions = getattr(self.best_model, 'W', None)
         
         if F_profiles is None or G_contributions is None:
-            print("⚠️ Factor structure diagnostics unavailable: model lacks H/W matrices")
+            print("[WARN] Factor structure diagnostics unavailable: model lacks H/W matrices")
             return
         
         # Calculate sparsity metrics
@@ -4946,7 +5350,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
                 f.write(f"    Max H Loading: {factor['h_max_loading']:.3f}\n")
                 f.write(f"    H Gini: {factor['h_gini']:.3f}\n")
         
-        print(f"   💾 Factor structure summary: {summary_file.name}")
+        print(f"   [SAVE] Factor structure summary: {summary_file.name}")
         
         # Store diagnostics for potential dashboard use
         self._factor_structure_diagnostics = {
@@ -4961,7 +5365,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         Create wind analysis plots showing how PMF factors vary with wind direction and speed.
         This is valuable for source apportionment as it can identify directional sources.
         """
-        print("   🌪️ Creating wind analysis plots...")
+        print("   [WIND] Creating wind analysis plots...")
         
         # Set matplotlib to non-interactive mode to prevent any display output
         import matplotlib
@@ -5003,7 +5407,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
                 wind_speed_col = col
         
         if not wind_dir_col and not wind_speed_col:
-            print("   ⚠️ No wind data found in dataset - skipping wind analysis")
+            print("   [WARN] No wind data found in dataset - skipping wind analysis")
             return
         
         # Get the corresponding meteorological data for PMF time points
@@ -5015,7 +5419,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
             datetime_index = pd.to_datetime(conc_data.index)
             has_datetime = True
         except:
-            print("   ⚠️ Unable to parse datetime for wind analysis")
+            print("   [WARN] Unable to parse datetime for wind analysis")
             return
         
         # Match meteorological data with PMF analysis times
@@ -5037,11 +5441,11 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
                 valid_indices.append(i)
         
         if len(wind_data) == 0:
-            print("   ⚠️ No matching wind data found for PMF time points")
+            print("   [WARN] No matching wind data found for PMF time points")
             return
         
         wind_df = pd.DataFrame(wind_data)
-        print(f"   📊 Found {len(wind_df)} matching wind/PMF data points")
+        print(f"   [DATA] Found {len(wind_df)} matching wind/PMF data points")
         
         # Filter PMF contributions to match wind data
         G_wind = G_contributions[valid_indices, :]
@@ -5068,14 +5472,14 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
             # Create simple wind rose
             wind_dirs = wind_df['wind_dir'].dropna()
             if len(wind_dirs) > 0:
-                # Bin wind directions into 16 sectors (22.5° each)
+                # Bin wind directions into 16 sectors (22.5 deg each)
                 bins = np.arange(0, 361, 22.5)
                 counts, bin_edges = np.histogram(wind_dirs, bins=bins)
                 
                 # Create bar chart representing wind rose
                 bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
                 ax1.bar(bin_centers, counts, width=20, alpha=0.7, color='skyblue', edgecolor='black')
-                ax1.set_xlabel('Wind Direction (°)')
+                ax1.set_xlabel('Wind Direction ( deg)')
                 ax1.set_ylabel('Frequency')
                 ax1.set_title('Wind Direction Distribution')
                 ax1.set_xlim(0, 360)
@@ -5140,7 +5544,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
             
         # Print correlation results (outside suppression context)
         if 'factor_wind_correlations' in locals() and factor_wind_correlations:
-            print(f"   🎯 Wind-correlated factors: {[(f+1, corr) for f, corr in factor_wind_correlations]}")
+            print(f"   [INIT] Wind-correlated factors: {[(f+1, corr) for f, corr in factor_wind_correlations]}")
         
         # Create a larger figure to accommodate all polar plots
         plt.close()  # Close current figure
@@ -5165,7 +5569,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
                 counts, bin_edges = np.histogram(wind_dirs, bins=bins)
                 bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
                 ax1.bar(bin_centers, counts, width=20, alpha=0.7, color='skyblue', edgecolor='black')
-                ax1.set_xlabel('Wind Direction (°)')
+                ax1.set_xlabel('Wind Direction ( deg)')
                 ax1.set_ylabel('Frequency')
                 ax1.set_title('Wind Direction Distribution')
                 ax1.set_xlim(0, 360)
@@ -5187,7 +5591,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
                 ax2.axvline(mean_ws, color='red', linestyle='--', linewidth=2, label=f'Mean: {mean_ws:.1f}')
                 ax2.legend()
         
-        # Plot 3: Factor Data Points vs Wind Direction (0-360°) (top right)
+        # Plot 3: Factor Data Points vs Wind Direction (0-360 deg) (top right)
         ax3 = fig.add_subplot(gs[0, 2:])
         if wind_dir_col and not wind_df['wind_dir'].isna().all():
             valid_mask = ~wind_df['wind_dir'].isna()
@@ -5197,9 +5601,9 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
                 fc = G_wind[valid_mask, f]
                 ax3.scatter(wd, fc, alpha=0.6, s=20, color=colors[f], label=f'Factor {f+1}')
             
-            ax3.set_xlabel('Wind Direction (°)')
+            ax3.set_xlabel('Wind Direction ( deg)')
             ax3.set_ylabel('Factor Contribution')
-            ax3.set_title('Factor Data Points vs Wind Direction (0-360°)')
+            ax3.set_title('Factor Data Points vs Wind Direction (0-360 deg)')
             ax3.set_xlim(0, 360)
             ax3.set_xticks(np.arange(0, 361, 45))
             ax3.set_xticklabels(['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW', 'N'])
@@ -5224,7 +5628,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
             if global_min == float('inf') or global_max == float('-inf'):
                 global_min, global_max = 0, 1  # Fallback range
             
-            print(f"   🎨 Using consistent color scale for polar plots: {global_min:.3f} to {global_max:.3f}")
+            print(f"   [UI] Using consistent color scale for polar plots: {global_min:.3f} to {global_max:.3f}")
             
             # Second pass: create polar plots with consistent scale
             for f in range(n_factors):
@@ -5410,7 +5814,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
         plt.close()
         plot_files.append(plot_path)
-        print(f"   ✅ Saved: wind_analysis.png")
+        print(f"   [OK] Saved: wind_analysis.png")
         
         # Create additional summary statistics
         self._create_wind_summary_stats(dashboard_dir, wind_df, G_wind)
@@ -5429,8 +5833,8 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
             f.write(f"Total matched data points: {len(wind_df)}\n")
             
             if 'wind_dir' in wind_df.columns and not wind_df['wind_dir'].isna().all():
-                f.write(f"Wind direction range: {wind_df['wind_dir'].min():.1f}° - {wind_df['wind_dir'].max():.1f}°\n")
-                f.write(f"Most frequent wind direction: {wind_df['wind_dir'].mode().iloc[0]:.1f}°\n")
+                f.write(f"Wind direction range: {wind_df['wind_dir'].min():.1f} deg - {wind_df['wind_dir'].max():.1f} deg\n")
+                f.write(f"Most frequent wind direction: {wind_df['wind_dir'].mode().iloc[0]:.1f} deg\n")
             
             if 'wind_speed' in wind_df.columns and not wind_df['wind_speed'].isna().all():
                 f.write(f"Wind speed range: {wind_df['wind_speed'].min():.1f} - {wind_df['wind_speed'].max():.1f}\n")
@@ -5462,14 +5866,14 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
                 
                 f.write("\n")
         
-        print(f"   📄 Wind summary statistics: {summary_path}")
+        print(f"   [FILE] Wind summary statistics: {summary_path}")
     
     def _create_temperature_analysis_plots(self, dashboard_dir, plot_files, G_contributions):
         """
         Create temperature analysis plots showing how PMF factors vary with temperature.
         This can help identify temperature-dependent sources (e.g., heating, biogenic emissions).
         """
-        print("   🌡️ Creating temperature analysis plots...")
+        print("   [TEMP] Creating temperature analysis plots...")
         
         # Look for temperature-related columns in the original dataset
         temp_columns = []
@@ -5485,10 +5889,10 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
                     temp_columns.append(col)
         
         if not temp_columns:
-            print("   ⚠️ No temperature data found in dataset - skipping temperature analysis")
+            print("   [WARN] No temperature data found in dataset - skipping temperature analysis")
             return
         
-        print(f"   📊 Found temperature columns: {temp_columns}")
+        print(f"   [DATA] Found temperature columns: {temp_columns}")
     
         # Get the corresponding temperature data for PMF time points
         conc_file = self.output_dir / f"{self.filename_prefix}_concentrations.csv"
@@ -5499,7 +5903,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
             datetime_index = pd.to_datetime(conc_data.index)
             has_datetime = True
         except:
-            print("   ⚠️ Unable to parse datetime for temperature analysis")
+            print("   [WARN] Unable to parse datetime for temperature analysis")
             return
         
         # Match temperature data with PMF analysis times
@@ -5520,11 +5924,11 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
                 valid_indices.append(i)
         
         if len(temp_data) == 0:
-            print("   ⚠️ No matching temperature data found for PMF time points")
+            print("   [WARN] No matching temperature data found for PMF time points")
             return
         
         temp_df = pd.DataFrame(temp_data)
-        print(f"   📊 Found {len(temp_df)} matching temperature/PMF data points")
+        print(f"   [DATA] Found {len(temp_df)} matching temperature/PMF data points")
         
         # Filter PMF contributions to match temperature data
         G_temp = G_contributions[valid_indices, :]
@@ -5551,17 +5955,17 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
             temp_values = temp_values[final_valid_mask]
             G_temp_valid = G_temp[valid_temp_mask, :][final_valid_mask, :]
         except Exception as e:
-            print(f"   ⚠️ Error converting temperature data to numeric: {e}")
+            print(f"   [WARN] Error converting temperature data to numeric: {e}")
             return
         
         if len(temp_values) == 0:
-            print(f"   ⚠️ No valid temperature data in {primary_temp_col}")
+            print(f"   [WARN] No valid temperature data in {primary_temp_col}")
             return
         
         # Plot 1: Temperature distribution (top left)
         ax1 = axes[0, 0]
         ax1.hist(temp_values, bins=30, alpha=0.7, color='orange', edgecolor='black')
-        ax1.set_xlabel(f'Temperature ({self.units.get(primary_temp_col, "°C")})')
+        ax1.set_xlabel(f'Temperature ({self.units.get(primary_temp_col, " degC")})')
         ax1.set_ylabel('Frequency')
         ax1.set_title('Temperature Distribution')
         ax1.grid(True, alpha=0.3)
@@ -5591,7 +5995,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
                 except:
                     pass  # Skip trend line if fitting fails
         
-        ax2.set_xlabel(f'Temperature ({self.units.get(primary_temp_col, "°C")})')
+        ax2.set_xlabel(f'Temperature ({self.units.get(primary_temp_col, " degC")})')
         ax2.set_ylabel('Factor Contribution')
         ax2.set_title('Factor Contributions vs Temperature')
         ax2.legend()
@@ -5638,7 +6042,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
                         transform=ax3.transAxes, ha='center', va='center',
                         bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.5))
             
-            ax3.set_xlabel(f'Temperature Bins ({self.units.get(primary_temp_col, "°C")})')
+            ax3.set_xlabel(f'Temperature Bins ({self.units.get(primary_temp_col, " degC")})')
             ax3.set_ylabel('Average Factor Contribution ± Std Dev')
             ax3.set_title('Factor Contributions by Temperature Category')
             ax3.set_xticks(x)
@@ -5715,7 +6119,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
                 temp_line = ax5_temp.plot(month_names, monthly_temp_clean, 'o-', 
                                          color='red', linewidth=3, markersize=8, 
                                          label='Temperature')
-                ax5_temp.set_ylabel(f'Temperature ({self.units.get(primary_temp_col, "°C")})', color='red')
+                ax5_temp.set_ylabel(f'Temperature ({self.units.get(primary_temp_col, " degC")})', color='red')
                 ax5_temp.tick_params(axis='y', labelcolor='red')
                 
                 # Plot factors as bars
@@ -5807,7 +6211,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
         plt.close()
         plot_files.append(plot_path)
-        print(f"   ✅ Saved: temperature_analysis.png")
+        print(f"   [OK] Saved: temperature_analysis.png")
         
         # Create additional summary statistics
         self._create_temperature_summary_stats(dashboard_dir, temp_df, G_temp, temp_columns, correlations, p_values)
@@ -5889,14 +6293,14 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
             f.write("  - Traffic-related sources (less temperature dependent)\n")
             f.write("  - Regional background contributions\n")
         
-        print(f"   📄 Temperature summary statistics: {summary_path}")
+        print(f"   [FILE] Temperature summary statistics: {summary_path}")
     
     def _create_pressure_analysis_plots(self, dashboard_dir, plot_files, G_contributions):
         """
         Create pressure analysis plots showing how PMF factors vary with atmospheric pressure.
         This can help identify pressure-dependent sources and meteorological influences.
         """
-        print("   💨 Creating pressure analysis plots...")
+        print("   [PRESSURE] Creating pressure analysis plots...")
         
         # Look for pressure-related columns in the original dataset
         pressure_columns = []
@@ -5912,10 +6316,10 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
                     pressure_columns.append(col)
         
         if not pressure_columns:
-            print("   ⚠️ No pressure data found in dataset - skipping pressure analysis")
+            print("   [WARN] No pressure data found in dataset - skipping pressure analysis")
             return
         
-        print(f"   📊 Found pressure columns: {pressure_columns}")
+        print(f"   [DATA] Found pressure columns: {pressure_columns}")
         
         # Get the corresponding pressure data for PMF time points
         conc_file = self.output_dir / f"{self.filename_prefix}_concentrations.csv"
@@ -5926,7 +6330,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
             datetime_index = pd.to_datetime(conc_data.index)
             has_datetime = True
         except:
-            print("   ⚠️ Unable to parse datetime for pressure analysis")
+            print("   [WARN] Unable to parse datetime for pressure analysis")
             return
         
         # Match pressure data with PMF analysis times
@@ -5947,11 +6351,11 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
                 valid_indices.append(i)
         
         if len(pressure_data) == 0:
-            print("   ⚠️ No matching pressure data found for PMF time points")
+            print("   [WARN] No matching pressure data found for PMF time points")
             return
         
         pressure_df = pd.DataFrame(pressure_data)
-        print(f"   📊 Found {len(pressure_df)} matching pressure/PMF data points")
+        print(f"   [DATA] Found {len(pressure_df)} matching pressure/PMF data points")
         
         # Filter PMF contributions to match pressure data
         G_pressure = G_contributions[valid_indices, :]
@@ -5978,11 +6382,11 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
             pressure_values = pressure_values[final_valid_mask]
             G_pressure_valid = G_pressure[valid_pressure_mask, :][final_valid_mask, :]
         except Exception as e:
-            print(f"   ⚠️ Error converting pressure data to numeric: {e}")
+            print(f"   [WARN] Error converting pressure data to numeric: {e}")
             return
         
         if len(pressure_values) == 0:
-            print(f"   ⚠️ No valid pressure data in {primary_pressure_col}")
+            print(f"   [WARN] No valid pressure data in {primary_pressure_col}")
             return
         
         # Plot 1: Pressure distribution (top left)
@@ -6234,7 +6638,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
         plt.close()
         plot_files.append(plot_path)
-        print(f"   ✅ Saved: pressure_analysis.png")
+        print(f"   [OK] Saved: pressure_analysis.png")
         
         # Create additional summary statistics
         self._create_pressure_summary_stats(dashboard_dir, pressure_df, G_pressure, pressure_columns, correlations, p_values)
@@ -6317,7 +6721,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
             f.write("  - Indoor/sheltered emission sources\n")
             f.write("  - Regional background contributions\n")
         
-        print(f"   📄 Pressure summary statistics: {summary_path}")
+        print(f"   [FILE] Pressure summary statistics: {summary_path}")
     
     def convert_dashboard_to_pdf(self, dashboard_dir, station=None):
         """Convert HTML dashboard to PDF using multiple fallback methods."""
@@ -6328,7 +6732,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         html_file = dashboard_dir / f"{self.filename_prefix}_pmf_dashboard.html"
         
         if not html_file.exists():
-            print(f"   ⚠️ HTML dashboard not found: {html_file}")
+            print(f"   [WARN] HTML dashboard not found: {html_file}")
             return None
         # Create PDF filename using filename_prefix
         pdf_file = dashboard_dir / f"{self.filename_prefix}_pmf_dashboard.pdf"
@@ -6339,10 +6743,10 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
                 try:
                     import weasyprint
                     weasyprint.HTML(filename=str(html_file)).write_pdf(str(pdf_file))
-                    print(f"   ✅ PDF created with weasyprint: {pdf_file.name}")
+                    print(f"   [OK] PDF created with weasyprint: {pdf_file.name}")
                     return pdf_file
                 except Exception as e:
-                    print(f"   ⚠️ Weasyprint failed: {e}, trying next method")
+                    print(f"   [WARN] Weasyprint failed: {e}, trying next method")
             
             # Method 2: Use pdfkit (requires wkhtmltopdf)
             if HAS_PDFKIT:
@@ -6360,34 +6764,34 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
                     }
                     
                     pdfkit.from_file(str(html_file), str(pdf_file), options=options)
-                    print(f"   ✅ PDF created with pdfkit: {pdf_file.name}")
+                    print(f"   [OK] PDF created with pdfkit: {pdf_file.name}")
                     return pdf_file
                 except Exception as e:
                     # Only log pdfkit failures if it's not the common missing executable issue
                     if 'wkhtmltopdf executable found' not in str(e):
-                        print(f"   ⚠️ pdfkit failed: {e}, trying next method")
+                        print(f"   [WARN] pdfkit failed: {e}, trying next method")
                     else:
-                        print(f"   ℹ️ pdfkit not available (wkhtmltopdf not found)")
+                        print(f"   [INFO] pdfkit not available (wkhtmltopdf not found)")
             
             # Method 3: Try using Chrome/Edge headless
             success = self._convert_with_chrome(html_file, pdf_file)
             if success:
-                print(f"   ✅ PDF created with Chrome: {pdf_file.name}")
+                print(f"   [OK] PDF created with Chrome: {pdf_file.name}")
                 return pdf_file
             
             # Method 4: Create a simple text-based report as fallback
             text_report = self._create_text_report(dashboard_dir, station_name)
-            print(f"   ⚠️ All PDF methods failed, created text report: {text_report.name if text_report else 'failed'}")
+            print(f"   [WARN] All PDF methods failed, created text report: {text_report.name if text_report else 'failed'}")
             return text_report
         
         except Exception as e:
-            print(f"   ❌ PDF conversion failed: {e}")
+            print(f"   [ERROR] PDF conversion failed: {e}")
             try:
                 text_report = self._create_text_report(dashboard_dir, station_name)
-                print(f"   ✅ Created fallback text report: {text_report.name if text_report else 'failed'}")
+                print(f"   [OK] Created fallback text report: {text_report.name if text_report else 'failed'}")
                 return text_report
             except Exception as e2:
-                print(f"   ❌ Even text report failed: {e2}")
+                print(f"   [ERROR] Even text report failed: {e2}")
                 return None
     
     def _convert_with_chrome(self, html_file, pdf_file):
@@ -6525,7 +6929,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
             return report_file
         
         except Exception as e:
-            print(f"   ❌ Failed to create text report: {e}")
+            print(f"   [ERROR] Failed to create text report: {e}")
             return None
     
     def _create_sankey_diagram(self, dashboard_dir, plot_files, F_profiles, G_contributions):
@@ -6533,7 +6937,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         Create a Sankey diagram showing the flow from PMF factors to species concentrations.
         This provides an intuitive visualization of how each factor contributes to different species.
         """
-        print("   🌊 Creating Sankey diagram (Factors → Species)...")
+        print("   [FLOW] Creating Sankey diagram (Factors -> Species)...")
         
         # Try multiple approaches in order of preference
         sankey_created = False
@@ -6651,7 +7055,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         # Final safety clamp
         pad_px = max(min_pad_px, pad_px)
         
-        print(f"   🧮 Sankey layout: thickness={thickness_px}px, pad={pad_px}px, nodes_left={left_nodes}, nodes_right={right_nodes}, available_px={available_px}")
+        print(f"   [CALC] Sankey layout: thickness={thickness_px}px, pad={pad_px}px, nodes_left={left_nodes}, nodes_right={right_nodes}, available_px={available_px}")
         
         # Fix node columns; let Plotly auto-position y to respect pad and avoid overlaps
         node_x = [0.01] * self.factors + [0.99] * len(self.species_names)
@@ -6678,7 +7082,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         
         fig.update_layout(
             title=dict(
-                text=f"{self.station} PMF Source Apportionment: Factor → Species Flow",
+                text=f"{self.station} PMF Source Apportionment: Factor -> Species Flow",
                 x=0.5,
                 font=dict(size=16)
             ),
@@ -6714,29 +7118,29 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
             try:
                 fig.write_image(str(png_path), format='png', width=1200, height=900, scale=2)
                 plot_files.append(png_path)
-                print(f"     ✅ Saved: sankey_diagram.png")
+                print(f"     [OK] Saved: sankey_diagram.png")
                 png_success = True
             except Exception as e1:
                 # Try without format specification
                 try:
                     fig.write_image(str(png_path), width=1200, height=900, scale=2)
                     plot_files.append(png_path)
-                    print(f"     ✅ Saved: sankey_diagram.png (fallback method)")
+                    print(f"     [OK] Saved: sankey_diagram.png (fallback method)")
                     png_success = True
                 except Exception as e2:
                     # Print both error messages for debugging
-                    print(f"     ⚠️ PNG export failed (method 1): {str(e1).strip()}")
-                    print(f"     ⚠️ PNG export failed (method 2): {str(e2).strip()}")
+                    print(f"     [WARN] PNG export failed (method 1): {str(e1).strip()}")
+                    print(f"     [WARN] PNG export failed (method 2): {str(e2).strip()}")
                         
         except Exception as png_err:
-            print(f"     ⚠️ PNG export outer exception: {str(png_err).strip()}")
+            print(f"     [WARN] PNG export outer exception: {str(png_err).strip()}")
         
         if not png_success:
-            print(f"     📊 Creating matplotlib-based Sankey fallback...")
+            print(f"     [DATA] Creating matplotlib-based Sankey fallback...")
             # Create a static matplotlib version as fallback
             self._create_matplotlib_sankey_simple(dashboard_dir, plot_files, F_profiles)
         
-        print(f"     ✅ Saved: sankey_diagram.html (interactive)")
+        print(f"     [OK] Saved: sankey_diagram.html (interactive)")
         return True
     
     def _create_matplotlib_sankey(self, dashboard_dir, plot_files, F_profiles, G_contributions):
@@ -6745,7 +7149,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         This is a simplified version since matplotlib doesn't have native Sankey support.
         """
         fig, ax = plt.subplots(figsize=(16, 10))
-        fig.suptitle(f'{self.station} PMF Factor → Species Flow Diagram', fontsize=16, fontweight='bold')
+        fig.suptitle(f'{self.station} PMF Factor -> Species Flow Diagram', fontsize=16, fontweight='bold')
         
         # Calculate the flow data
         factor_species_flows = F_profiles  # Shape: (n_factors, n_species)
@@ -6851,14 +7255,14 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
         plt.close()
         plot_files.append(plot_path)
-        print(f"     ✅ Saved: sankey_diagram.png")
+        print(f"     [OK] Saved: sankey_diagram.png")
     
     def _create_matplotlib_sankey_simple(self, dashboard_dir, plot_files, F_profiles):
         """
         Create a simplified flow diagram when Plotly PNG export fails.
         """
         fig, ax = plt.subplots(figsize=(14, 8))
-        fig.suptitle(f'{self.station} PMF Factor → Species Contribution Matrix', fontsize=16, fontweight='bold')
+        fig.suptitle(f'{self.station} PMF Factor -> Species Contribution Matrix', fontsize=16, fontweight='bold')
         
         # Create a heatmap-style representation
         im = ax.imshow(F_profiles, cmap='viridis', aspect='auto')
@@ -6892,7 +7296,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
         plt.close()
         plot_files.append(plot_path)
-        print(f"     ✅ Saved: sankey_diagram.png (heatmap style)")
+        print(f"     [OK] Saved: sankey_diagram.png (heatmap style)")
     
     def _create_flow_chart_alternative(self, dashboard_dir, plot_files, F_profiles):
         """
@@ -6963,7 +7367,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
         plt.close()
         plot_files.append(plot_path)
-        print(f"     ✅ Saved: sankey_diagram.png (flow chart style)")
+        print(f"     [OK] Saved: sankey_diagram.png (flow chart style)")
     
     def _create_matplotlib_sankey_proper(self, dashboard_dir, plot_files, F_profiles):
         """
@@ -6973,7 +7377,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
             from matplotlib.sankey import Sankey
             
             fig, ax = plt.subplots(figsize=(14, 10))
-            fig.suptitle(f'{self.station} PMF Factor → Species Sankey Diagram', fontsize=16, fontweight='bold')
+            fig.suptitle(f'{self.station} PMF Factor -> Species Sankey Diagram', fontsize=16, fontweight='bold')
             
             # Create Sankey instance
             sankey = Sankey(ax=ax, scale=0.01, offset=0.3, format='%.0f', gap=0.5)
@@ -7023,11 +7427,11 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
             plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
             plt.close()
             plot_files.append(plot_path)
-            print(f"     ✅ Saved: sankey_diagram.png (matplotlib Sankey)")
+            print(f"     [OK] Saved: sankey_diagram.png (matplotlib Sankey)")
             return True
             
         except Exception as e:
-            print(f"     ⚠️ Matplotlib Sankey failed: {e}")
+            print(f"     [WARN] Matplotlib Sankey failed: {e}")
             return False
     
     def _create_custom_flow_sankey(self, dashboard_dir, plot_files, F_profiles, G_contributions):
@@ -7036,7 +7440,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         This is designed to be a reliable fallback that always works.
         """
         fig, ax = plt.subplots(figsize=(16, 12))
-        fig.suptitle(f'{self.station} PMF Source Apportionment Flow Diagram\n(Factors → Species)', 
+        fig.suptitle(f'{self.station} PMF Source Apportionment Flow Diagram\n(Factors -> Species)', 
                     fontsize=18, fontweight='bold')
         
         # Calculate flow data
@@ -7198,7 +7602,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
         plt.close()
         plot_files.append(plot_path)
-        print(f"     ✅ Saved: sankey_diagram.png (custom flow diagram)")
+        print(f"     [OK] Saved: sankey_diagram.png (custom flow diagram)")
         return True
 
 
@@ -7371,7 +7775,7 @@ def show_detailed_help():
                         --species-weight CH4=10         # Strong downweighting
                         
                         Effects on PMF:
-                        - Increases uncertainty → reduces species weight in LS objective
+                        - Increases uncertainty -> reduces species weight in LS objective
                         - Does NOT change concentration values
                         - Helps address extreme dynamic range differences
                         - Preserves PMF additive assumptions (unlike log-transform)
@@ -7577,7 +7981,7 @@ def main():
     if args.station and (args.data_dir or args.patterns):
         parser.error("Cannot specify both station and --data-dir/--patterns. Choose one approach.")
     
-    print("🚀 MMF PMF Source Apportionment Analysis (ESAT Fixed)")
+    print("MMF PMF Source Apportionment Analysis (ESAT Fixed)")
     print("=" * 60)
     if args.station:
         print(f"Station: {args.station}")
@@ -7654,7 +8058,7 @@ def main():
         # Validate models count (ESAT requires at least 1)
         pmf.models = max(1, int(args.models))
         if args.models < 1:
-            print("⚠️  --models must be >= 1; defaulting to 1")
+            print("[WARN]  --models must be >= 1; defaulting to 1")
         pmf.max_factors = args.max_factors  # Pass max_factors for optimization
         pmf.max_workers = args.max_workers  # Control multiprocessing
 
@@ -7662,10 +8066,10 @@ def main():
         pmf.drop_row_threshold = max(0.0, min(1.0, args.drop_row_threshold))
         pmf.zero_as_bdl = args.zero_as_bdl
         pmf.save_masks = args.save_masks
-        print(f"⚙️  BDL/Missing controls: drop-row-threshold={pmf.drop_row_threshold}, zero-as-bdl={pmf.zero_as_bdl}, save-masks={pmf.save_masks}")
+        print(f"[CONFIG] BDL/Missing controls: drop-row-threshold={pmf.drop_row_threshold}, zero-as-bdl={pmf.zero_as_bdl}, save-masks={pmf.save_masks}")
         
         # Show EPA S/N weighting settings
-        print(f"🔬 EPA S/N weighting: uncertainty-mode={pmf.uncertainty_mode}, snr-enable={pmf.snr_enable}")
+        print(f"[EPA] S/N weighting: uncertainty-mode={pmf.uncertainty_mode}, snr-enable={pmf.snr_enable}")
         if pmf.snr_enable:
             print(f"   S/N thresholds: weak<{pmf.snr_weak_threshold}, bad<{pmf.snr_bad_threshold}")
             print(f"   Data quality: BDL weak>{pmf.snr_bdl_weak_frac*100:.0f}%, bad>{pmf.snr_bdl_bad_frac*100:.0f}%")
@@ -7677,11 +8081,11 @@ def main():
         if pmf.run_pmf_analysis():
             # Run PCA analysis if requested
             if args.run_pca:
-                print("\n🔬 Running PCA analysis for comparison...")
+                print("\n[PCA] Running PCA analysis for comparison...")
                 if pmf.run_pca_analysis():
-                    print("✅ PCA analysis completed successfully")
+                    print("[OK] PCA analysis completed successfully")
                 else:
-                    print("⚠️ PCA analysis failed, continuing without comparison plots")
+                    print("[WARN] PCA analysis failed, continuing without comparison plots")
             
             pmf.create_pmf_dashboard()
             pmf.generate_report()
@@ -7689,38 +8093,38 @@ def main():
             # Create PDF if requested
             pdf_path = None
             if args.create_pdf:
-                print("\n📄 Creating PDF version of dashboard...")
+                print("\n[FILE] Creating PDF version of dashboard...")
                 # Use the exact HTML filename that was created
                 dashboard_dir = pmf.output_dir
                 
                 pdf_path = pmf.convert_dashboard_to_pdf(dashboard_dir)
                 if pdf_path:
-                    print(f"✅ PDF created: {pdf_path}")
+                    print(f"[OK] PDF created: {pdf_path}")
                 else:
-                    print("⚠️ PDF creation failed, but text report may have been created")
+                    print("[WARN] PDF creation failed, but text report may have been created")
             
-            print("\n🎉 Analysis Complete!")
+            print("\n[SUCCESS] Analysis Complete!")
             if args.run_pca:
-                print("📊 PMF + PCA analysis results saved")
+                print("[DATA] PMF + PCA analysis results saved")
                 print("   PMF-PCA comparison plots included in dashboard")
             else:
-                print("📊 PMF analysis results saved")
+                print("[DATA] PMF analysis results saved")
                 print("   Use --run-pca flag to include PCA comparison plots")
             
             if not args.create_pdf:
                 print("   Use --create-pdf flag to generate PDF reports")
             elif pdf_path:
-                print(f"📄 PDF dashboard: {pdf_path}")
+                print(f"[FILE] PDF dashboard: {pdf_path}")
             
-            print(f"📊 Results saved in: {pmf.output_dir}")
+            print(f"[DATA] Results saved in: {pmf.output_dir}")
             dashboard_name = f"{args.station}_pmf_dashboard.html" if args.station else "mmf_pmf_dashboard.html"
-            print(f"📄 View dashboard: {pmf.output_dir}/{dashboard_name}")
+            print(f"[FILE] View dashboard: {pmf.output_dir}/{dashboard_name}")
         else:
-            print("\n❌ PMF analysis failed!")
+            print("\n[ERROR] PMF analysis failed!")
             return 1
         
     except Exception as e:
-        print(f"\n❌ Analysis failed: {e}")
+        print(f"\n[ERROR] Analysis failed: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
