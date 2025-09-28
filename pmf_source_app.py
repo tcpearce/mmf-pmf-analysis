@@ -177,7 +177,9 @@ class MMFPMFAnalyzer:
                  snr_missing_bad_frac=0.4, exclude_bad=True, dashboard_snr_panel=True, write_diagnostics=True,
                  scale_units=True, seed=42, robust_fit=False, robust_alpha=4.0,
                  method="ls-nmf", init_method="column_mean", init_norm=True, hold_h=False, delay_h=-1, 
-                 species_weight=None, exclude_species=None, weight_aware_init=None):
+                 species_weight=None, exclude_species=None, weight_aware_init=None,
+                 reg_species=None, reg_lambda=None, reg_template=None, reg_template_files=None,
+                 reg_bursts=5, reg_iter_per_burst=50, reg_tol=1e-4, reg_elastic_l1=0.0):
         """
         Initialize PMF analyzer for MMF data.
         
@@ -218,6 +220,14 @@ class MMFPMFAnalyzer:
             species_weight (list): List of species uncertainty multipliers (e.g., ['CH4=5', 'H2S=2'])
             exclude_species (list): List of species to exclude from PMF analysis entirely (e.g., ['CH4', 'H2S'])
             weight_aware_init (bool): Enable weight-aware initialization for weighted species (None = auto-detect from species_weight)
+            reg_species (list): List of species names to regularize (e.g., ['CH4', 'H2S'])
+            reg_lambda (list): Regularization strength lambda per species (broadcast if single value)
+            reg_template (list): Template types per species ('zero', 'uniform', 'from-file')
+            reg_template_files (list): CSV file paths for from-file templates
+            reg_bursts (int): Number of train->prox cycles for regularization
+            reg_iter_per_burst (int): Max iterations per training burst
+            reg_tol (float): Early stop tolerance for relative change in regulated columns
+            reg_elastic_l1 (float): Elastic-net L1 penalty on deviation from h0
         """
         self.station = station
         self.data_dir = data_dir
@@ -330,6 +340,23 @@ class MMFPMFAnalyzer:
             print("⚠️ Warning: Weight-aware initialization enabled but no species weights specified")
         elif self.weight_aware_init:
             print(f"🎯 Weight-aware initialization enabled for {len(self.species_weight_dict)} weighted species")
+        
+        # Species regularization control
+        self.reg_species_raw = reg_species or []
+        self.reg_lambda_raw = reg_lambda or []
+        self.reg_template_raw = reg_template or []
+        self.reg_template_files_raw = reg_template_files or []
+        self.reg_bursts = int(reg_bursts)
+        self.reg_iter_per_burst = int(reg_iter_per_burst)
+        self.reg_tol = float(reg_tol)
+        self.reg_elastic_l1 = float(reg_elastic_l1)
+        
+        # Validate and normalize regularization parameters
+        self._validate_regularization_parameters()
+        
+        # Regularization plan will be computed in _prepare_regularization()
+        self._reg_plan = []
+        self._reg_enabled = bool(self.reg_species_raw)
     
     def _parse_species_weights(self, species_weight_list):
         """Parse species weight specifications into a dictionary.
@@ -420,6 +447,236 @@ class MMFPMFAnalyzer:
                     print(f"✅ Species scheduled for exclusion: {species_name}")
         
         return exclude_set
+    
+    def _validate_regularization_parameters(self):
+        """Validate and normalize regularization parameters with broadcasting.
+        
+        This method handles:
+        - Broadcasting singleton values to all species
+        - Validating list length consistency
+        - Checking template/file combinations
+        - Providing helpful error messages
+        """
+        if not self.reg_species_raw:
+            return  # No regularization, nothing to validate
+            
+        n_species = len(self.reg_species_raw)
+        
+        # Helper function to broadcast singleton lists
+        def broadcast_list(lst, name, default_value=None):
+            if not lst:
+                if default_value is not None:
+                    return [default_value] * n_species
+                else:
+                    raise ValueError(f"{name} list is empty but species are specified for regularization")
+            elif len(lst) == 1:
+                print(f"📡 Broadcasting single {name} value {lst[0]} to {n_species} species")
+                return lst * n_species
+            elif len(lst) == n_species:
+                return lst
+            else:
+                raise ValueError(
+                    f"{name} list length ({len(lst)}) must be 1 (broadcast) or {n_species} (per-species). "
+                    f"Species: {self.reg_species_raw}"
+                )
+        
+        # Validate and broadcast lists
+        try:
+            self.reg_lambda_norm = broadcast_list(self.reg_lambda_raw, "lambda", 1.0)
+            self.reg_template_norm = broadcast_list(self.reg_template_raw, "template", "zero")
+            
+            # Validate lambda values
+            for i, lam in enumerate(self.reg_lambda_norm):
+                if lam <= 0:
+                    raise ValueError(f"Lambda value must be > 0 for species {self.reg_species_raw[i]} (got {lam})")
+                if lam > 1e6:
+                    print(f"⚠️ Warning: Very large lambda {lam} for {self.reg_species_raw[i]} may cause numerical issues")
+            
+            # Validate template choices
+            valid_templates = {'zero', 'uniform', 'from-file'}
+            for i, template in enumerate(self.reg_template_norm):
+                if template not in valid_templates:
+                    raise ValueError(
+                        f"Invalid template '{template}' for species {self.reg_species_raw[i]}. "
+                        f"Must be one of: {valid_templates}"
+                    )
+            
+            # Handle template files for from-file templates
+            from_file_count = sum(1 for t in self.reg_template_norm if t == 'from-file')
+            if from_file_count > 0:
+                if len(self.reg_template_files_raw) != from_file_count:
+                    raise ValueError(
+                        f"Need {from_file_count} template files for 'from-file' templates, "
+                        f"but got {len(self.reg_template_files_raw)} file paths"
+                    )
+                # Check that files exist (will be done later in _prepare_regularization)
+            
+            print(f"✅ Regularization parameters validated for {n_species} species")
+            for i, species in enumerate(self.reg_species_raw):
+                template_desc = self.reg_template_norm[i]
+                if template_desc == 'from-file':
+                    file_idx = sum(1 for j in range(i) if self.reg_template_norm[j] == 'from-file')
+                    template_desc += f" ({self.reg_template_files_raw[file_idx]})"
+                print(f"   {species}: lambda={self.reg_lambda_norm[i]}, template={template_desc}")
+                
+        except Exception as e:
+            print(f"❌ Regularization parameter validation failed: {e}")
+            raise
+    
+    def _construct_regularization_template(self, template_type, template_file_path, factors, species_name):
+        """Construct regularization template h0 for a specific species.
+        
+        Args:
+            template_type (str): 'zero', 'uniform', or 'from-file'
+            template_file_path (str): Path to CSV file for 'from-file' type
+            factors (int): Number of factors (k)
+            species_name (str): Species name for error messages
+            
+        Returns:
+            numpy.ndarray: Template vector h0 of shape (factors,)
+        """
+        import numpy as np
+        
+        if template_type == 'zero':
+            h0 = np.zeros(factors, dtype=np.float64)
+            print(f"   {species_name}: Zero template (all zeros)")
+            
+        elif template_type == 'uniform':
+            # Small uniform vector, sum-normalized to be tiny
+            uniform_value = 1e-6  # Tiny positive value
+            h0 = np.full(factors, uniform_value, dtype=np.float64)
+            h0 = h0 / np.sum(h0) * uniform_value * factors  # Keep total mass small
+            print(f"   {species_name}: Uniform template (value={uniform_value:.1e} each)")
+            
+        elif template_type == 'from-file':
+            if not template_file_path:
+                raise ValueError(f"Template file path required for 'from-file' template for {species_name}")
+            
+            try:
+                import pandas as pd
+                from pathlib import Path
+                
+                file_path = Path(template_file_path)
+                if not file_path.exists():
+                    raise FileNotFoundError(f"Template file not found: {template_file_path}")
+                
+                # Read CSV - expect single column with k rows
+                df = pd.read_csv(file_path)
+                if df.shape[1] != 1:
+                    raise ValueError(f"Template file must have exactly 1 column, got {df.shape[1]} in {template_file_path}")
+                if df.shape[0] != factors:
+                    raise ValueError(f"Template file must have {factors} rows (one per factor), got {df.shape[0]} in {template_file_path}")
+                
+                h0 = df.iloc[:, 0].values.astype(np.float64)
+                
+                # Validate: must be non-negative and finite
+                if np.any(h0 < 0):
+                    raise ValueError(f"Template values must be non-negative in {template_file_path}")
+                if not np.all(np.isfinite(h0)):
+                    raise ValueError(f"Template values must be finite in {template_file_path}")
+                
+                print(f"   {species_name}: From-file template (range: {np.min(h0):.3e} to {np.max(h0):.3e})")
+                
+            except Exception as e:
+                raise ValueError(f"Failed to load template file {template_file_path} for {species_name}: {e}")
+                
+        else:
+            raise ValueError(f"Unknown template type '{template_type}' for {species_name}")
+        
+        # Final validation
+        if h0.shape != (factors,):
+            raise ValueError(f"Template shape mismatch: expected ({factors},), got {h0.shape} for {species_name}")
+        if not np.all(np.isfinite(h0)):
+            raise ValueError(f"Template contains non-finite values for {species_name}")
+        if np.any(h0 < 0):
+            raise ValueError(f"Template contains negative values for {species_name}")
+        
+        return h0
+    
+    def _prepare_regularization(self):
+        """Prepare the regularization plan by mapping species to column indices and building templates.
+        
+        This method:
+        - Maps regulated species names to concentration matrix column indices
+        - Builds template vectors for each regulated species
+        - Stores the complete regularization plan in self._reg_plan
+        - Warns about species not found in data
+        
+        Should be called after prepare_pmf_data() when species list and factors are known.
+        """
+        if not self._reg_enabled:
+            return
+            
+        print(f"🔧 Preparing regularization for {len(self.reg_species_raw)} species...")
+        
+        # Map species names to concentration matrix column indices
+        if not hasattr(self, 'concentration_data') or self.concentration_data is None:
+            raise RuntimeError("Cannot prepare regularization before concentration data is loaded")
+            
+        species_columns = list(self.concentration_data.columns)
+        name_to_idx = {col.upper(): j for j, col in enumerate(species_columns)}
+        
+        print(f"   Available species columns: {species_columns}")
+        
+        # Build regularization plan
+        self._reg_plan = []
+        file_counter = 0  # Track from-file template file index
+        
+        for i, species in enumerate(self.reg_species_raw):
+            species_upper = species.upper()
+            
+            # Check if species exists in data
+            if species_upper not in name_to_idx:
+                print(f"   ⚠️ Warning: Regularization target '{species}' not found in data. Skipping.")
+                continue
+                
+            col_idx = name_to_idx[species_upper]
+            lambda_val = self.reg_lambda_norm[i]
+            template_type = self.reg_template_norm[i]
+            
+            # Handle template file path for from-file templates
+            template_file_path = None
+            if template_type == 'from-file':
+                if file_counter >= len(self.reg_template_files_raw):
+                    print(f"   ❌ Error: Missing template file for {species}. Skipping.")
+                    continue
+                template_file_path = self.reg_template_files_raw[file_counter]
+                file_counter += 1
+            
+            # Build template (requires factors to be set)
+            if not hasattr(self, 'factors') or self.factors is None:
+                raise RuntimeError("Cannot prepare regularization before number of factors is determined")
+                
+            try:
+                h0 = self._construct_regularization_template(
+                    template_type, template_file_path, self.factors, species
+                )
+                
+                # Store in regularization plan
+                reg_item = {
+                    'species': species,
+                    'species_upper': species_upper,
+                    'col_idx': col_idx,
+                    'lambda': lambda_val,
+                    'template_type': template_type,
+                    'template_file': template_file_path,
+                    'h0': h0
+                }
+                self._reg_plan.append(reg_item)
+                
+                print(f"   ✅ Mapped {species} to column {col_idx}: lambda={lambda_val}, template={template_type}")
+                
+            except Exception as e:
+                print(f"   ❌ Error preparing template for {species}: {e}. Skipping.")
+                continue
+        
+        if not self._reg_plan:
+            print(f"   ⚠️ Warning: No valid regularization targets found. Regularization will be disabled.")
+            self._reg_enabled = False
+        else:
+            print(f"   🎯 Regularization prepared for {len(self._reg_plan)} species")
+            
+        return len(self._reg_plan)
     
     def _create_filename_prefix(self):
         """Create standardized filename prefix with dates and identifier."""
@@ -6889,6 +7146,25 @@ def main():
                           help='Disable weight-aware initialization even when species weights are applied')
     parser.set_defaults(weight_aware_init=None)
     
+    # Species regularization control
+    parser.add_argument('--reg-species', action='append', default=[],
+                       help='Species to regularize (repeatable). Example: --reg-species CH4 --reg-species H2S')
+    parser.add_argument('--reg-lambda', action='append', type=float, default=[],
+                       help='Regularization strength lambda per species. If single value provided, broadcast to all reg-species. Example: --reg-lambda 10')
+    parser.add_argument('--reg-template', action='append', default=[],
+                       choices=['zero', 'uniform', 'from-file'],
+                       help='Template type per regulated species: zero (h0=0), uniform (small uniform vector), from-file (CSV with k values). Broadcast if single value.')
+    parser.add_argument('--reg-template-file', action='append', default=[],
+                       help='CSV file path for from-file template (k rows, 1 column). Must match count of from-file template entries.')
+    parser.add_argument('--reg-bursts', type=int, default=5,
+                       help='Number of train->prox cycles for regularization (default: 5)')
+    parser.add_argument('--reg-iter-per-burst', type=int, default=50,
+                       help='Max iterations per training burst (default: 50)')
+    parser.add_argument('--reg-tol', type=float, default=1e-4,
+                       help='Early stop tolerance: relative change in regulated columns (default: 1e-4)')
+    parser.add_argument('--reg-elastic-l1', type=float, default=0.0,
+                       help='Elastic-net L1 penalty on deviation from h0 (default: 0.0, disabled)')
+    
     args = parser.parse_args()
     
     # Handle detailed help request
@@ -6955,7 +7231,16 @@ def main():
             # Species exclusion from analysis
             exclude_species=args.exclude_species,
             # Weight-aware initialization control
-            weight_aware_init=args.weight_aware_init
+            weight_aware_init=args.weight_aware_init,
+            # Species regularization control
+            reg_species=args.reg_species,
+            reg_lambda=args.reg_lambda,
+            reg_template=args.reg_template,
+            reg_template_files=args.reg_template_file,
+            reg_bursts=args.reg_bursts,
+            reg_iter_per_burst=args.reg_iter_per_burst,
+            reg_tol=args.reg_tol,
+            reg_elastic_l1=args.reg_elastic_l1
         )
         
         # Override default parameters if specified
