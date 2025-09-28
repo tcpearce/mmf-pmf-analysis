@@ -678,6 +678,179 @@ class MMFPMFAnalyzer:
             
         return len(self._reg_plan)
     
+    def _compute_uncertainty_weights(self, U_col, species_name):
+        """Compute uncertainty weights (We = 1/U^2) for a species column with numerical guards.
+        
+        Args:
+            U_col (array-like): Uncertainty values for a single species (n_samples,)
+            species_name (str): Species name for error messages
+            
+        Returns:
+            numpy.ndarray: Uncertainty weights We of shape (n_samples,)
+            
+        This method implements the guards specified in the plan:
+        - Replace 0/NaN/inf U with species median positive U
+        - Ensure We stays finite
+        - Add epsilon floors in denominators
+        """
+        import numpy as np
+        
+        # Convert to float64 array
+        u = np.asarray(U_col, dtype=np.float64)
+        
+        # Step 1: Identify problematic values (zero, NaN, inf)
+        problematic_mask = ~(np.isfinite(u) & (u > 0))
+        n_problematic = np.sum(problematic_mask)
+        
+        if n_problematic > 0:
+            # Find replacement value: median of positive finite values
+            good_values = u[~problematic_mask]
+            if len(good_values) > 0:
+                replacement_value = np.median(good_values)
+                print(f"   ⚠️ {species_name}: Found {n_problematic}/{len(u)} problematic U values, replacing with median={replacement_value:.3e}")
+            else:
+                # All values are problematic - use a reasonable default
+                replacement_value = 1.0  # Conservative uncertainty
+                print(f"   ⚠️ {species_name}: All U values problematic, using default={replacement_value}")
+            
+            # Replace problematic values
+            u_clean = u.copy()
+            u_clean[problematic_mask] = replacement_value
+        else:
+            u_clean = u
+            print(f"   ✅ {species_name}: All {len(u)} uncertainty values are positive and finite")
+        
+        # Step 2: Compute weights with epsilon floor to avoid division issues
+        epsilon = 1e-12  # Minimum uncertainty floor
+        u_safe = np.maximum(u_clean, epsilon)
+        
+        # We = 1 / U^2 
+        we = 1.0 / np.square(u_safe)
+        
+        # Step 3: Final validation
+        if not np.all(np.isfinite(we)):
+            print(f"   ❌ {species_name}: Non-finite weights after computation - this should not happen")
+            # Emergency fallback: uniform weights
+            we = np.ones_like(we, dtype=np.float64)
+            
+        # Report statistics
+        print(f"   📊 {species_name} weights: min={np.min(we):.3e}, median={np.median(we):.3e}, max={np.max(we):.3e}")
+        
+        return we
+    
+    def _ridge_proximal_update(self, W, V_col, U_col, h_current, lambda_val, h0, species_name):
+        """Perform closed-form ridge regularization proximal update for a single species column.
+        
+        Solves: (W^T D W + lambda I) h = W^T D v + lambda h0
+        Then projects: h <- max(h, 0)
+        
+        Args:
+            W (np.ndarray): Factor contributions matrix (n_samples, k)
+            V_col (np.ndarray): Concentration data for species (n_samples,)
+            U_col (np.ndarray): Uncertainty data for species (n_samples,)
+            h_current (np.ndarray): Current H column for species (k,)
+            lambda_val (float): Regularization strength
+            h0 (np.ndarray): Template vector (k,)
+            species_name (str): Species name for logging
+            
+        Returns:
+            np.ndarray: Updated H column h_new (k,)
+            
+        This implements the closed-form solution from the mathematical plan:
+        - Compute D = diag(We) where We = 1/U^2
+        - Solve normal equations with regularization
+        - Project to nonnegativity
+        - Validate objective decrease
+        """
+        import numpy as np
+        
+        # Convert inputs to float64 for numerical stability
+        W = np.asarray(W, dtype=np.float64)
+        V_col = np.asarray(V_col, dtype=np.float64)
+        h_current = np.asarray(h_current, dtype=np.float64)
+        h0 = np.asarray(h0, dtype=np.float64)
+        
+        k = W.shape[1]  # Number of factors
+        n = W.shape[0]  # Number of samples
+        
+        # Step 1: Compute uncertainty weights D = diag(We)
+        we = self._compute_uncertainty_weights(U_col, species_name)
+        
+        # Step 2: Compute normal equations components efficiently
+        # A = W^T D W + lambda I
+        # b = W^T D v + lambda h0
+        
+        # Vectorized computation: W^T * we (broadcasting)
+        WT_scaled = W.T * we  # Shape: (k, n)
+        
+        # A = WT_scaled @ W + lambda * I
+        A = WT_scaled @ W + lambda_val * np.eye(k, dtype=np.float64)
+        
+        # b = WT_scaled @ V_col + lambda * h0
+        b = WT_scaled @ V_col + lambda_val * h0
+        
+        print(f"   🔢 {species_name}: Solving ({k}x{k}) system, lambda={lambda_val}, cond(A)={np.linalg.cond(A):.2e}")
+        
+        # Step 3: Solve linear system with numerical stability checks
+        try:
+            # Check condition number
+            cond_A = np.linalg.cond(A)
+            if cond_A > 1e12:
+                print(f"   ⚠️ {species_name}: High condition number {cond_A:.2e}, adding jitter")
+                # Add small diagonal jitter for numerical stability
+                jitter = 1e-12 * np.trace(A) / k
+                A += jitter * np.eye(k)
+                
+            # Solve normal equations
+            h_new = np.linalg.solve(A, b)
+            
+        except np.linalg.LinAlgError as e:
+            print(f"   ❌ {species_name}: Linear solve failed: {e}. Using fallback.")
+            # Fallback: use current h (no update)
+            h_new = h_current.copy()
+            
+        # Step 4: Project to nonnegativity
+        h_new_proj = np.maximum(h_new, 0.0)
+        n_negative = np.sum(h_new < 0)
+        if n_negative > 0:
+            print(f"   ✂️ {species_name}: Projected {n_negative}/{k} negative values to zero")
+            
+        # Step 5: Validate objective decrease (as specified in plan)
+        objective_before = self._ridge_objective(W, V_col, we, h_current, lambda_val, h0)
+        objective_after = self._ridge_objective(W, V_col, we, h_new_proj, lambda_val, h0)
+        
+        if objective_after > objective_before + 1e-9 * max(1.0, objective_before):
+            print(f"   ⚠️ {species_name}: Objective increased {objective_before:.3e} -> {objective_after:.3e}, keeping current h")
+            h_new_proj = h_current.copy()
+        else:
+            obj_decrease = objective_before - objective_after
+            rel_decrease = obj_decrease / max(1e-12, objective_before)
+            print(f"   ✓ {species_name}: Objective decreased by {obj_decrease:.3e} ({rel_decrease:.2%})")
+            
+        # Step 6: Report update statistics
+        delta_norm = np.linalg.norm(h_new_proj - h_current)
+        rel_change = delta_norm / (np.linalg.norm(h_current) + 1e-12)
+        
+        print(f"   📈 {species_name}: ||h_new - h_old||={delta_norm:.3e}, rel_change={rel_change:.3e}")
+        
+        return h_new_proj
+    
+    def _ridge_objective(self, W, V_col, we, h, lambda_val, h0):
+        """Compute ridge regularized objective value for validation.
+        
+        Objective: 0.5 * ||sqrt(D)(v - Wh)||^2 + 0.5 * lambda * ||h - h0||^2
+        """
+        import numpy as np
+        
+        # Data fidelity term: 0.5 * sum(we * (v - Wh)^2)
+        residual = V_col - W @ h
+        data_term = 0.5 * np.sum(we * residual**2)
+        
+        # Regularization term: 0.5 * lambda * ||h - h0||^2
+        reg_term = 0.5 * lambda_val * np.sum((h - h0)**2)
+        
+        return data_term + reg_term
+    
     def _create_filename_prefix(self):
         """Create standardized filename prefix with dates and identifier."""
         # Format dates for filename (replace invalid characters)
