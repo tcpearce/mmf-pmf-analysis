@@ -125,6 +125,27 @@ This file tracks all changes made to the codebase with timestamps and descriptio
 
 ## Next Planned Changes
 
+## 2025-09-28 14:58 - Comparison script and visualization fixes
+
+- Added comparison utility to evaluate unit scaling vs uncertainty weighting effects on CH4.
+  - New script: `compare_scaling_vs_weighting.py`
+  - Runs two scenarios on the same date range:
+    1) scale_units=True, no species weighting
+    2) scale_units=False, species_weight CH4=1000
+  - Prints CH4 BDL count (when available), and V/U min/median/max, with a brief summary.
+  - Default uncertainty mode is legacy to expose BDL masks.
+- Sankey diagram layout improvements to eliminate vertical overlaps:
+  - Switched to Plotly arrangement="snap" so Plotly optimizes y positions.
+  - Dynamic node pad/thickness based on figure height and node counts.
+  - Removes manual y arrays that could conflict with pixel sizing.
+- Polar wind factor plots now use a consistent global color scale and radial limits for factor contributions
+  across all components, enabling direct cross-factor comparison.
+- PCA loadings plot title updated to include "(after Varimax rotation)".
+- Dashboard now includes a "Species Exclusions" section summarizing any species removed via --exclude-species.
+- Species exclusion CLI end-to-end wired (initialization, parsing, filtering, provenance CSV, dashboard note).
+
+Git Commit: [pending commit hash]
+
 **Immediate Priority**:
 - Test MMF2 processing with 30min timebase aggregation
 - Process MMF9 with same parameters
@@ -1213,3 +1234,100 @@ python pmf_source_app.py MMF9 --species-weight CH4=5,H2S=2,NO2=1.5
 **Next Steps**: Test with October MMF9 data (baseline vs CH4=5 weighted comparison)
 
 **Git Commit**: [229286a](https://github.com/tcpearce/mmf-pmf-analysis/commit/229286a)
+
+## 2025-09-28 13:40 - 📊 Enhanced PMF Dashboard Visualization
+
+**Status**: **COMPLETED** - Improved relative factor profiles visualization and added dedicated PCA loadings plots.
+
+### 1. Enhanced Relative Factor Profiles with Logarithmic Scale ✅
+
+**Issue**: Relative composition plots used linear scale, making it difficult to visualize species with vastly different concentrations (e.g., CH4 vs trace species).
+
+**Enhancement**: 
+- **Modified relative factor profiles plot** to use logarithmic y-axis scale
+- **Added zero-value handling** for log scale compatibility (replaces zeros with 1e-6)
+- **Updated y-axis label** to indicate log scale: "Relative Composition (log scale)"
+- **Set appropriate limits** from 1e-6 to 1.0 for better visualization
+
+**Benefits**:
+- Better visualization of multi-order magnitude differences in species concentrations
+- Clearer factor interpretation when species like CH4 dominate absolute values
+- Enhanced ability to see relative contributions of trace species
+
+### 2. Added Dedicated PCA Loadings Plots ✅
+
+**Issue**: When `--run-pca` flag was used, PCA analysis was performed but dedicated loadings plots were not included in the dashboard.
+
+**Enhancement**:
+- **Added new `_create_pca_loadings_plot()` method** to generate dedicated PCA component loadings plots
+- **Integrated with existing dashboard generation** as Plot 17 after PCA comparison plots
+- **Color-coded loadings by sign**: Red for positive, blue for negative loadings
+- **Added variance explained labels**: Each component shows its percentage of variance explained
+- **Included legend**: First subplot shows positive/negative loading legend
+- **Zero reference line**: Added horizontal line at y=0 for clarity
+
+**Technical Details**:
+- Dynamic subplot layout (2×2, 2×3, 3×3, 3×4, or 4×4) based on number of components
+- Proper species labeling with 45° rotation
+- Grid overlay for better readability
+- Saved as `{prefix}_pca_loadings.png` in dashboard directory
+
+**Files Modified**:
+- `pmf_source_app.py` - Enhanced relative profiles visualization and added PCA loadings plot method
+
+**Integration**:
+- Log-scale relative profiles: Applied to all PMF runs automatically
+- PCA loadings plots: Generated only when `--run-pca` flag is used, appearing at end of dashboard
+
+**Impact**: Improved interpretability of PMF factor profiles and comprehensive PCA analysis visualization when requested.
+
+**Git Commit**: [Insert commit hash after commit]
+
+## 2025-09-28 18:15 - 🎯 Weight-Aware PMF Initialization for Species Weighting
+
+**Status**: **IMPLEMENTED** - Added weight-aware initialization to resolve PMF factor degeneracy when using species uncertainty weighting.
+
+### Problem Addressed
+**Issue**: When using `--species-weight CH4=5`, PMF factor profiles became highly correlated instead of showing improved separation. Higher weight multipliers paradoxically increased factor correlation, indicating degeneracy in the optimization starting point.
+
+### Solution: Weight-Aware K-Means Initialization
+**Implementation**: Custom initialization method that pre-scales concentration data by inverse uncertainty weights before k-means clustering:
+
+1. **Pre-scaling**: Scale concentration matrix columns by `1/weight_factor` for weighted species
+2. **K-means clustering**: Apply clustering on magnitude-balanced data
+3. **Factor initialization**: Generate H (profiles) and W (contributions) from balanced centroids
+4. **Scale restoration**: Return to original concentration units for PMF training
+
+### CLI Integration
+**New Parameters**:
+- `--weight-aware-init`: Enable weight-aware initialization (auto-enabled when species weights used)
+- `--no-weight-aware-init`: Force disable for comparison testing
+
+**Auto-Detection**: Automatically enabled when `--species-weight` parameters are specified
+**Compatibility**: Forces single SA mode (BatchSA doesn't support custom initialization)
+
+### Technical Changes
+**Files Modified**: `pmf_source_app.py`
+- Added `weight_aware_init` parameter to `MMFPMFAnalyzer` constructor
+- Implemented `_weight_aware_initialize()` method with k-means clustering logic
+- Added CLI parameter parsing and validation
+- Modified PMF training flow to use custom initialization when enabled
+- Added auto-mode switching logic (BatchSA → SA when weight-aware init active)
+
+**Expected Benefits**:
+- Reduced factor profile correlations when using species uncertainty weighting
+- Better factor separation for datasets with extreme species concentration ranges
+- Preserved model quality while improving factor distinctiveness
+
+**Usage Example**:
+```bash
+# Auto-enabled with species weighting:
+python pmf_source_app.py MMF9 --species-weight CH4=5 --uncertainty-mode epa
+
+# Force disable for comparison:
+python pmf_source_app.py MMF9 --species-weight CH4=5 --no-weight-aware-init
+```
+
+**Next**: Run validation sweep on MMF9 January 2024 data to verify correlation improvements.
+
+**Git Commit**: [Insert commit hash after testing]

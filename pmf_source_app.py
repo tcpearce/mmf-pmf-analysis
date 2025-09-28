@@ -176,7 +176,8 @@ class MMFPMFAnalyzer:
                  snr_bad_threshold=0.2, snr_bdl_weak_frac=0.6, snr_bdl_bad_frac=0.8, snr_missing_weak_frac=0.2,
                  snr_missing_bad_frac=0.4, exclude_bad=True, dashboard_snr_panel=True, write_diagnostics=True,
                  scale_units=True, seed=42, robust_fit=False, robust_alpha=4.0,
-                 method="ls-nmf", init_method="column_mean", init_norm=True, hold_h=False, delay_h=-1, species_weight=None):
+                 method="ls-nmf", init_method="column_mean", init_norm=True, hold_h=False, delay_h=-1, 
+                 species_weight=None, exclude_species=None, weight_aware_init=None):
         """
         Initialize PMF analyzer for MMF data.
         
@@ -215,6 +216,8 @@ class MMFPMFAnalyzer:
             hold_h (bool): Hold H (profile) matrix constant during training
             delay_h (int): Hold H matrix for N iterations, then release (-1 = disabled)
             species_weight (list): List of species uncertainty multipliers (e.g., ['CH4=5', 'H2S=2'])
+            exclude_species (list): List of species to exclude from PMF analysis entirely (e.g., ['CH4', 'H2S'])
+            weight_aware_init (bool): Enable weight-aware initialization for weighted species (None = auto-detect from species_weight)
         """
         self.station = station
         self.data_dir = data_dir
@@ -312,6 +315,21 @@ class MMFPMFAnalyzer:
         # Species-specific uncertainty weighting
         self.species_weight_raw = species_weight or []
         self.species_weight_dict = self._parse_species_weights(self.species_weight_raw)
+        
+        # Species exclusion from PMF analysis
+        self.exclude_species_raw = exclude_species or []
+        self.exclude_species_set = self._parse_species_exclusions(self.exclude_species_raw)
+        
+        # Weight-aware initialization control (auto-enable if species weights are applied)
+        if weight_aware_init is None:
+            self.weight_aware_init = bool(self.species_weight_dict)  # Auto-enable if weights specified
+        else:
+            self.weight_aware_init = bool(weight_aware_init)
+        
+        if self.weight_aware_init and not self.species_weight_dict:
+            print("⚠️ Warning: Weight-aware initialization enabled but no species weights specified")
+        elif self.weight_aware_init:
+            print(f"🎯 Weight-aware initialization enabled for {len(self.species_weight_dict)} weighted species")
     
     def _parse_species_weights(self, species_weight_list):
         """Parse species weight specifications into a dictionary.
@@ -368,6 +386,40 @@ class MMFPMFAnalyzer:
                     continue
         
         return weight_dict
+    
+    def _parse_species_exclusions(self, exclude_species_list):
+        """Parse species exclusion specifications into a set.
+        
+        Args:
+            exclude_species_list (list): List of species to exclude (e.g., ['CH4', 'H2S,NO2'])
+            
+        Returns:
+            set: Set of species names (case-insensitive uppercase) to exclude
+        """
+        exclude_set = set()
+        
+        if not exclude_species_list:
+            return exclude_set
+        
+        for spec in exclude_species_list:
+            # Handle comma-separated multiple species in single spec
+            for item in spec.split(','):
+                species_name = item.strip()
+                
+                # Validate species name
+                if not species_name:
+                    print(f"Warning: Empty species name in exclusion list. Skipping.")
+                    continue
+                
+                # Store with case-insensitive key (convert to uppercase for matching)
+                key = species_name.upper()
+                if key in exclude_set:
+                    print(f"Warning: Duplicate species exclusion for {species_name}. Ignoring duplicate.")
+                else:
+                    exclude_set.add(key)
+                    print(f"✅ Species scheduled for exclusion: {species_name}")
+        
+        return exclude_set
     
     def _create_filename_prefix(self):
         """Create standardized filename prefix with dates and identifier."""
@@ -581,7 +633,36 @@ class MMFPMFAnalyzer:
         # Select columns that exactly match target species (avoid auxiliary columns like 'n_*')
         pollutant_columns = [col for col in self.df.columns if col in all_species]
         
-        print(f"📋 Selected pollutants for PMF: {pollutant_columns}")
+        # Apply species exclusions if specified
+        if self.exclude_species_set:
+            excluded_columns = []
+            remaining_columns = []
+            
+            for col in pollutant_columns:
+                if col.upper() in self.exclude_species_set:
+                    excluded_columns.append(col)
+                else:
+                    remaining_columns.append(col)
+            
+            # Determine which requested species were not found
+            found_species_upper = {col.upper() for col in pollutant_columns}
+            not_found_species = [species for species in self.exclude_species_set 
+                               if species not in found_species_upper]
+            
+            # Store results for provenance tracking
+            self._excluded_species_applied = excluded_columns
+            self._excluded_species_not_found = list(not_found_species)
+            
+            if excluded_columns:
+                print(f"🚫 Excluding {len(excluded_columns)} species from PMF analysis: {excluded_columns}")
+                pollutant_columns = remaining_columns
+            else:
+                print(f"⚠️ No species matched exclusion list: {list(self.exclude_species_set)}")
+            
+            if not_found_species:
+                print(f"⚠️ {len(not_found_species)} requested exclusions not found in data: {list(not_found_species)}")
+        
+        print(f"📋 Final pollutants for PMF: {pollutant_columns}")
         
         # Report data availability for different species types
         gas_cols = [col for col in pollutant_columns if any(gas in col for gas in gas_species)]
@@ -648,6 +729,10 @@ class MMFPMFAnalyzer:
         # Apply species-specific uncertainty weighting if specified
         if self.species_weight_dict:
             self._apply_species_weighting()
+        
+        # Save species exclusions provenance if any exclusions were specified
+        if self.exclude_species_set:
+            self._save_species_exclusions_csv()
         
         # Save processed data
         self._save_processed_data()
@@ -876,6 +961,36 @@ class MMFPMFAnalyzer:
             weights_file = self.output_dir / f"{self.filename_prefix}_species_weights.csv"
             weights_df.to_csv(weights_file, index=False)
             print(f"   💾 Species weights saved: {weights_file.name}")
+    
+    def _save_species_exclusions_csv(self):
+        """Save species exclusion application results to CSV for provenance."""
+        species_exclusion_data = []
+        
+        # Add excluded species (from current state)
+        excluded_species = getattr(self, '_excluded_species_applied', [])
+        for species in excluded_species:
+            species_exclusion_data.append({
+                'species': species,
+                'was_present': True,
+                'excluded': True,
+                'reason': 'CLI exclusion flag'
+            })
+        
+        # Add requested species that were not found
+        not_found_species = getattr(self, '_excluded_species_not_found', [])
+        for species in not_found_species:
+            species_exclusion_data.append({
+                'species': species,
+                'was_present': False,
+                'excluded': False,
+                'reason': 'Species not found in data'
+            })
+        
+        if species_exclusion_data:
+            exclusions_df = pd.DataFrame(species_exclusion_data)
+            exclusions_file = self.output_dir / f"{self.filename_prefix}_species_exclusions.csv"
+            exclusions_df.to_csv(exclusions_file, index=False)
+            print(f"   💾 Species exclusions saved: {exclusions_file.name}")
     
     def _generate_uncertainty_matrix(self, pollutant_columns):
         """
@@ -1334,10 +1449,13 @@ class MMFPMFAnalyzer:
         # Optimize number of factors (EPA recommendation: try multiple values)
         self._optimize_factors(V, U)
         
-        # Check if robust mode is requested - force single SA if needed
+        # Check if robust mode is requested or weight-aware init is enabled - force single SA if needed
         use_batch_sa = USE_BATCH_SA
         if self.robust_fit and USE_BATCH_SA:
             print("⚠️  Robust mode requested: forcing single SA mode (BatchSA doesn't support robust training)")
+            use_batch_sa = False
+        elif self.weight_aware_init and self.species_weight_dict and USE_BATCH_SA:
+            print("🎯 Weight-aware initialization enabled: forcing single SA mode (BatchSA doesn't support custom initialization)")
             use_batch_sa = False
         
         # Run PMF models
@@ -1381,6 +1499,9 @@ class MMFPMFAnalyzer:
                 if self.robust_fit:
                     print(f"🔧 Running {self.models} SA models with ROBUST mode (alpha={self.robust_alpha})")
                     print("   → Robust training will downweight outliers during optimization")
+                elif self.weight_aware_init and self.species_weight_dict:
+                    print(f"🎯 Running {self.models} SA models with WEIGHT-AWARE initialization")
+                    print("   → Custom initialization accounts for species uncertainty weights")
                 else:
                     print(f"⚠️ Running {self.models} SA models (BatchSA not available or disabled)")
                 
@@ -1402,11 +1523,8 @@ class MMFPMFAnalyzer:
                         verbose=False  # Reduce verbosity for multiple models
                     )
                     
-                    # Initialize matrices with configured parameters
-                    sa_model.initialize(
-                        init_method=self.init_method,
-                        init_norm=self.init_norm
-                    )
+                    # Initialize matrices with weight-aware method if enabled
+                    self._weight_aware_initialize(sa_model, species_names, V, U)
                     
                     # Train with all configured parameters
                     sa_model.train(
@@ -1454,6 +1572,119 @@ class MMFPMFAnalyzer:
             return False
         
         return True
+    
+    def _weight_aware_initialize(self, sa_model, species_names, V, U):
+        """
+        Custom weight-aware initialization for ESAT SA models.
+        
+        This method implements a weight-aware k-means initialization that considers
+        uncertainty weights when clustering data, providing better initial factor
+        profiles when species have dramatically different uncertainty weights.
+        
+        Args:
+            sa_model: ESAT SA model instance
+            species_names (list): List of species names matching V columns
+            V (np.ndarray): Concentration data matrix
+            U (np.ndarray): Uncertainty data matrix
+            
+        Returns:
+            None: Modifies sa_model.W and sa_model.H in place
+        """
+        if not self.weight_aware_init or not self.species_weight_dict:
+            # Fallback to standard initialization
+            sa_model.initialize(
+                init_method=self.init_method,
+                init_norm=self.init_norm
+            )
+            return
+        
+        print(f"🎯 Applying weight-aware initialization...")
+        
+        # Create weight mapping for current species
+        species_weights = np.ones(len(species_names))  # Default weight = 1
+        
+        for i, species in enumerate(species_names):
+            species_upper = species.upper()
+            if species_upper in self.species_weight_dict:
+                weight_factor = self.species_weight_dict[species_upper]
+                # Weight affects uncertainty: U_weighted = U_original * weight_factor
+                # For initialization, we want to reduce the influence of high-weight (high-uncertainty) species
+                # So we scale the concentration by inverse weight to balance magnitudes
+                species_weights[i] = 1.0 / weight_factor
+                print(f"  {species}: weight factor = {weight_factor:.1f}, init scaling = {species_weights[i]:.3f}")
+        
+        # Create weight-scaled concentration matrix for initialization
+        # Scale each column (species) by its inverse weight to balance magnitudes
+        V_scaled = V.copy()
+        for i in range(V_scaled.shape[1]):
+            V_scaled[:, i] = V_scaled[:, i] * species_weights[i]
+        
+        print(f"  Original V range: [{np.min(V):.3f}, {np.max(V):.3f}]")
+        print(f"  Scaled V range: [{np.min(V_scaled):.3f}, {np.max(V_scaled):.3f}]")
+        
+        # Apply k-means clustering on weight-scaled data
+        from scipy.cluster.vq import kmeans2, whiten
+        
+        # Use the same random seed as the SA model
+        rng = np.random.default_rng(sa_model.seed)
+        
+        # Optionally whiten the scaled data if init_norm is enabled
+        obs = V_scaled
+        if self.init_norm:
+            obs = whiten(obs=V_scaled)
+            print(f"  Applied whitening: V range after whitening: [{np.min(obs):.3f}, {np.max(obs):.3f}]")
+        
+        try:
+            # Perform k-means clustering
+            centroids, clusters = kmeans2(data=obs, k=sa_model.factors, seed=sa_model.seed)
+            print(f"  K-means clustering completed: {sa_model.factors} factors")
+            
+            # Initialize W (factor contributions) based on cluster assignments
+            W = np.zeros(shape=(V.shape[0], sa_model.factors)) + (1.0 / sa_model.factors)
+            for i, cluster_id in enumerate(clusters):
+                # Add some noise to avoid identical contributions
+                W[i, cluster_id] = rng.normal(1.0, 0.1, None)
+            
+            # Ensure non-negative W for ls-nmf
+            if sa_model.method == "ls-nmf":
+                W[W <= 0.0] = 1e-12
+            
+            # Initialize H (factor profiles) from centroids, scaled back to original units
+            H = centroids.copy()
+            
+            # Scale H back to original concentration units by reversing the weight scaling
+            for i in range(H.shape[1]):
+                H[:, i] = H[:, i] / species_weights[i]
+            
+            # Ensure non-negative H
+            H[H <= 0.0] = 1e-12
+            
+            # Normalize H profiles (sum to 1 for each species across factors)
+            H = H / H.sum(axis=0)
+            
+            # Initialize ESAT model with the prepared matrices using the public API
+            sa_model.initialize(
+                H=H.astype(np.float64),
+                W=W.astype(np.float64),
+                init_method='column_mean',  # ensure ESAT does not override provided H/W
+                init_norm=self.init_norm
+            )
+            
+            # Force Python update path to avoid dtype mismatch in Rust-optimized update
+            sa_model.optimized = False
+            
+            print("  Weight-aware initialization complete (via SA.initialize, Python update path)")
+            print(f"    W shape: {W.shape}, range: [{np.min(W):.6f}, {np.max(W):.6f}]")
+            print(f"    H shape: {H.shape}, range: [{np.min(H):.6f}, {np.max(H):.6f}]")
+            
+        except Exception as e:
+            print(f"  ⚠️ Weight-aware initialization failed: {e}")
+            print(f"  Falling back to standard initialization")
+            # Fallback to standard initialization
+            sa_model.initialize(
+                init_method=self.init_method,
+                init_norm=self.init_norm
+            )
     
     def _optimize_factors(self, V, U):
         """
@@ -1713,7 +1944,7 @@ class MMFPMFAnalyzer:
                 
                 ax.set_title(f'Factor {i+1}', fontweight='bold', fontsize=12)
                 ax.set_xlabel('Species', fontsize=10)
-                ax.set_ylabel('Contribution', fontsize=10)
+                ax.set_ylabel('Contribution (μg/m³)', fontsize=10)
                 ax.set_xticks(range(len(self.species_names)))
                 ax.set_xticklabels(self.species_names, rotation=45, ha='right', fontsize=8)
                 ax.grid(True, alpha=0.3)
@@ -1739,6 +1970,58 @@ class MMFPMFAnalyzer:
             
         except Exception as e:
             print(f"   ❌ Error creating factor profiles: {e}")
+        
+        # New: Relative (composition) profiles per factor for scale-invariant view
+        try:
+            n_factors = F_profiles.shape[0]
+            if n_factors <= 4:
+                nrows, ncols = 2, 2
+            elif n_factors <= 6:
+                nrows, ncols = 2, 3
+            elif n_factors <= 9:
+                nrows, ncols = 3, 3
+            elif n_factors <= 12:
+                nrows, ncols = 3, 4
+            else:
+                nrows, ncols = 4, 4
+            fig, axes = plt.subplots(nrows, ncols, figsize=(5*ncols, 4*nrows))
+            station_display_name = self._get_station_display_name()
+            fig.suptitle(f'{station_display_name} PMF Factor Profiles (Relative Composition)', fontsize=16, fontweight='bold')
+            if n_factors == 1:
+                axes = [axes]
+            else:
+                axes = axes.flatten()
+            for i in range(n_factors):
+                ax = axes[i]
+                profile = F_profiles[i, :]
+                s = np.sum(profile)
+                rel = profile / s if s > 0 else profile
+                
+                # Replace zeros with small positive values for log scale
+                rel_log = np.where(rel <= 0, 1e-6, rel)
+                
+                factor_color = self.color_manager.get_factor_color(i)
+                bars = ax.bar(range(len(self.species_names)), rel_log, alpha=0.8, color=factor_color)
+                ax.set_title(f'Factor {i+1}', fontweight='bold', fontsize=12)
+                ax.set_xlabel('Species', fontsize=10)
+                ax.set_ylabel('Relative Composition (log scale)', fontsize=10)
+                ax.set_xticks(range(len(self.species_names)))
+                ax.set_xticklabels(self.species_names, rotation=45, ha='right', fontsize=8)
+                ax.set_yscale('log')
+                ax.set_ylim(1e-6, 1.0)
+                ax.grid(True, alpha=0.3)
+            total_subplots = nrows * ncols
+            for i in range(n_factors, total_subplots):
+                if i < len(axes):
+                    axes[i].set_visible(False)
+            plt.tight_layout()
+            plot_path_rel = dashboard_dir / f"{self.filename_prefix}_factor_profiles_relative.png"
+            plt.savefig(plot_path_rel, dpi=300, bbox_inches='tight', facecolor='white')
+            plt.close()
+            plot_files.append(plot_path_rel)
+            print(f"   ✅ Saved: factor_profiles_relative.png")
+        except Exception as e:
+            print(f"   ❌ Error creating relative factor profiles: {e}")
         
         try:
             # Plot 2: Factor Contributions Time Series
@@ -1941,6 +2224,12 @@ class MMFPMFAnalyzer:
             self._create_pca_comparison_plots(dashboard_dir, plot_files)
         except Exception as e:
             print(f"   ❌ Error creating PCA comparison plots: {e}")
+        
+        # Plot 17: PCA Loadings Plots (if PCA has been run)
+        try:
+            self._create_pca_loadings_plot(dashboard_dir, plot_files)
+        except Exception as e:
+            print(f"   ❌ Error creating PCA loadings plots: {e}")
         
         # Generate factor structure diagnostics summary
         try:
@@ -2234,6 +2523,11 @@ class MMFPMFAnalyzer:
             for species, weight in self._species_weights_applied.items():
                 cmd_parts.append(f'--species-weight {species}={weight}')
         
+        # Add species exclusion parameters
+        if hasattr(self, '_excluded_species_applied') and self._excluded_species_applied:
+            for species in self._excluded_species_applied:
+                cmd_parts.append(f'--exclude-species {species}')
+        
         # Add other non-default parameters
         non_defaults = {
 'uncertainty_epsilon': (1e-12, cli_params['uncertainty_epsilon']),
@@ -2285,6 +2579,11 @@ class MMFPMFAnalyzer:
         if hasattr(self, '_species_weights_applied') and self._species_weights_applied:
             for species, weight in self._species_weights_applied.items():
                 param_info[f'species_weight_{species}'] = (weight, f'Uncertainty multiplier for {species}')
+        
+        # Add species exclusions if any applied
+        if hasattr(self, '_excluded_species_applied') and self._excluded_species_applied:
+            excluded_list = ', '.join(sorted(self._excluded_species_applied))
+            param_info['excluded_species'] = (excluded_list, 'Species completely removed from PMF analysis')
         
         for param, (value, description) in param_info.items():
             html_section += f"""
@@ -2470,6 +2769,40 @@ class MMFPMFAnalyzer:
             html_content += """
                 </table>
                 <p><small><em>Note: Uncertainty multiplication reduces species influence in ESAT LS-PMF optimization without changing concentrations.</em></small></p>
+            </div>
+            """
+        
+        # Add species exclusion section if any species were excluded
+        if hasattr(self, '_excluded_species_applied') and self._excluded_species_applied:
+            html_content += f"""
+            <div class="epa-section">
+                <h2>🚫 Species Exclusions</h2>
+                <p>The following species were completely removed from PMF analysis via the --exclude-species flag:</p>
+                <table>
+                    <tr><th>Species</th><th>Reason</th></tr>
+            """
+            
+            for species in sorted(self._excluded_species_applied):
+                html_content += f"""
+                    <tr>
+                        <td><strong>{species}</strong></td>
+                        <td>CLI exclusion flag</td>
+                    </tr>
+                """
+            
+            # Add any species that were requested but not found
+            if hasattr(self, '_excluded_species_not_found') and self._excluded_species_not_found:
+                for species in sorted(self._excluded_species_not_found):
+                    html_content += f"""
+                        <tr>
+                            <td><em>{species}</em></td>
+                            <td>Requested but not found in data</td>
+                        </tr>
+                    """
+            
+            html_content += """
+                </table>
+                <p><small><em>Note: Excluded species are completely removed from concentration and uncertainty matrices before PMF analysis.</em></small></p>
             </div>
             """
         
@@ -3771,6 +4104,72 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         plot_files.append(plot_path)
         print(f"   ✅ Saved: detailed_profile_comparison.png")
     
+    def _create_pca_loadings_plot(self, dashboard_dir, plot_files):
+        """
+        Create dedicated PCA loadings plots at the end of analysis when PCA is run.
+        """
+        print("   📊 Creating PCA loadings plots...")
+        
+        if not hasattr(self, 'pca_loadings') or self.pca_loadings is None:
+            print("   ⚠️ No PCA results found - skipping PCA loadings plots")
+            return
+        
+        # Calculate optimal subplot layout for PCA components
+        n_components = self.factors
+        if n_components <= 4:
+            nrows, ncols = 2, 2
+        elif n_components <= 6:
+            nrows, ncols = 2, 3
+        elif n_components <= 9:
+            nrows, ncols = 3, 3
+        elif n_components <= 12:
+            nrows, ncols = 3, 4
+        else:
+            nrows, ncols = 4, 4
+        
+        fig, axes = plt.subplots(nrows, ncols, figsize=(5*ncols, 4*nrows))
+        station_display_name = self._get_station_display_name()
+        fig.suptitle(f'{station_display_name} PCA Component Loadings (after Varimax rotation)', 
+                    fontsize=16, fontweight='bold')
+        
+        # Flatten axes array for easier indexing
+        if n_components == 1:
+            axes = [axes]
+        else:
+            axes = axes.flatten()
+        
+        # Plot all PCA components
+        for i in range(n_components):
+            ax = axes[i]
+            loadings = self.pca_loadings[:, i]
+            
+            # Use consistent component color (same color for positive and negative)
+            component_color = self.color_manager.get_factor_color(i)
+            
+            bars = ax.bar(range(len(self.species_names)), loadings, alpha=0.8, color=component_color)
+            
+            ax.set_title(f'PC{i+1} (Explains {self.pca_explained_variance[i]:.1%} variance)', 
+                        fontweight='bold', fontsize=12)
+            ax.set_xlabel('Species', fontsize=10)
+            ax.set_ylabel('Loading', fontsize=10)
+            ax.set_xticks(range(len(self.species_names)))
+            ax.set_xticklabels(self.species_names, rotation=45, ha='right', fontsize=8)
+            ax.axhline(y=0, color='black', linestyle='-', alpha=0.5)  # Zero reference line
+            ax.grid(True, alpha=0.3)
+        
+        # Hide unused subplots
+        total_subplots = nrows * ncols
+        for i in range(n_components, total_subplots):
+            if i < len(axes):
+                axes[i].set_visible(False)
+        
+        plt.tight_layout()
+        plot_path = dashboard_dir / f"{self.filename_prefix}_pca_loadings.png"
+        plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
+        plt.close()
+        plot_files.append(plot_path)
+        print(f"   ✅ Saved: pca_loadings.png")
+    
     def _generate_factor_structure_summary(self):
         """Generate factor structure diagnostics for model validation.
         
@@ -3782,58 +4181,67 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         
         print("📊 Generating factor structure diagnostics...")
         
-        # Get factor profiles (H) and contributions (W)
-        F_profiles = self.best_model.F.T  # Transpose to get (n_factors, n_species)
-        G_contributions = self.best_model.G  # (n_samples, n_factors)
+        # Get factor profiles (H) and contributions (W) from ESAT model
+        # H shape: (n_factors, n_species), W shape: (n_samples, n_factors)
+        F_profiles = getattr(self.best_model, 'H', None)
+        G_contributions = getattr(self.best_model, 'W', None)
+        
+        if F_profiles is None or G_contributions is None:
+            print("⚠️ Factor structure diagnostics unavailable: model lacks H/W matrices")
+            return
         
         # Calculate sparsity metrics
         def calculate_sparsity(matrix, threshold=0.01):
             """Calculate sparsity as fraction of elements below threshold."""
-            return np.mean(np.abs(matrix) < threshold)
+            return float(np.mean(np.abs(matrix) < threshold))
         
         def calculate_gini_coefficient(array):
             """Calculate Gini coefficient as sparsity measure."""
-            array = np.abs(array).flatten()
-            array = array[array > 0]  # Remove zeros
-            if len(array) == 0:
+            arr = np.abs(np.asarray(array)).flatten()
+            arr = arr[arr > 0]
+            if arr.size == 0:
                 return 0.0
-            array = np.sort(array)
-            n = len(array)
+            arr.sort()
+            n = arr.size
             index = np.arange(1, n + 1)
-            return (2 * np.sum(index * array)) / (n * np.sum(array)) - (n + 1) / n
+            return float((2 * np.sum(index * arr)) / (n * np.sum(arr)) - (n + 1) / n)
         
         # W (contributions) sparsity analysis
         w_sparsity_01 = calculate_sparsity(G_contributions, 0.01)
         w_sparsity_05 = calculate_sparsity(G_contributions, 0.05)
-        w_gini = np.mean([calculate_gini_coefficient(G_contributions[:, i]) for i in range(self.factors)])
+        w_gini = float(np.mean([calculate_gini_coefficient(G_contributions[:, i]) for i in range(self.factors)]))
         
         # H (profiles) sparsity analysis
         h_sparsity_01 = calculate_sparsity(F_profiles, 0.01)
         h_sparsity_05 = calculate_sparsity(F_profiles, 0.05)
-        h_gini = np.mean([calculate_gini_coefficient(F_profiles[i, :]) for i in range(self.factors)])
+        h_gini = float(np.mean([calculate_gini_coefficient(F_profiles[i, :]) for i in range(self.factors)]))
         
         # W correlation matrix (factor time series correlations)
         w_corr_matrix = np.corrcoef(G_contributions.T)
-        w_max_off_diagonal = np.max(np.abs(w_corr_matrix[np.triu_indices_from(w_corr_matrix, k=1)]))
-        w_mean_off_diagonal = np.mean(np.abs(w_corr_matrix[np.triu_indices_from(w_corr_matrix, k=1)]))
+        w_off = np.abs(w_corr_matrix[np.triu_indices_from(w_corr_matrix, k=1)])
+        w_max_off_diagonal = float(np.max(w_off)) if w_off.size else 0.0
+        w_mean_off_diagonal = float(np.mean(w_off)) if w_off.size else 0.0
         
         # H correlation matrix (factor profile correlations)
         h_corr_matrix = np.corrcoef(F_profiles)
-        h_max_off_diagonal = np.max(np.abs(h_corr_matrix[np.triu_indices_from(h_corr_matrix, k=1)]))
-        h_mean_off_diagonal = np.mean(np.abs(h_corr_matrix[np.triu_indices_from(h_corr_matrix, k=1)]))
+        h_off = np.abs(h_corr_matrix[np.triu_indices_from(h_corr_matrix, k=1)])
+        h_max_off_diagonal = float(np.max(h_off)) if h_off.size else 0.0
+        h_mean_off_diagonal = float(np.mean(h_off)) if h_off.size else 0.0
         
         # Individual factor diagnostics
         factor_diagnostics = []
+        species_cols = list(self.concentration_data.columns)
         for i in range(self.factors):
+            row = F_profiles[i, :]
             factor_diag = {
                 'factor_id': i + 1,
-                'w_variance': np.var(G_contributions[:, i]),
-                'w_mean': np.mean(G_contributions[:, i]),
+                'w_variance': float(np.var(G_contributions[:, i])),
+                'w_mean': float(np.mean(G_contributions[:, i])),
                 'w_sparsity_01': calculate_sparsity(G_contributions[:, i], 0.01),
-                'h_sparsity_01': calculate_sparsity(F_profiles[i, :], 0.01),
-                'h_dominant_species': self.concentration_data.columns[np.argmax(F_profiles[i, :])],
-                'h_max_loading': np.max(F_profiles[i, :]),
-                'h_gini': calculate_gini_coefficient(F_profiles[i, :])
+                'h_sparsity_01': calculate_sparsity(row, 0.01),
+                'h_dominant_species': species_cols[int(np.argmax(row))] if len(species_cols) == row.shape[0] else str(int(np.argmax(row))),
+                'h_max_loading': float(np.max(row)),
+                'h_gini': calculate_gini_coefficient(row)
             }
             factor_diagnostics.append(factor_diag)
         
@@ -3884,6 +4292,14 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
                 f.write(f"    H Gini: {factor['h_gini']:.3f}\n")
         
         print(f"   💾 Factor structure summary: {summary_file.name}")
+        
+        # Store diagnostics for potential dashboard use
+        self._factor_structure_diagnostics = {
+            'w_corr_max_offdiag': w_max_off_diagonal,
+            'w_corr_mean_offdiag': w_mean_off_diagonal,
+            'h_corr_max_offdiag': h_max_off_diagonal,
+            'h_corr_mean_offdiag': h_mean_off_diagonal
+        }
     
     def _create_wind_analysis_plots(self, dashboard_dir, plot_files, G_contributions):
         """
@@ -4135,8 +4551,27 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
             ax3.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
             ax3.grid(True, alpha=0.3)
         
-        # Create polar plots for ALL factors (larger size)
+        # Create polar plots for ALL factors (larger size) with consistent color scale
         if wind_dir_col and not wind_df['wind_dir'].isna().all():
+            # Calculate global min/max across all factors for consistent color scaling
+            global_min = float('inf')
+            global_max = float('-inf')
+            
+            # First pass: find global min/max across all factors
+            for f in range(n_factors):
+                valid_mask = ~(wind_df['wind_dir'].isna() | np.isnan(G_wind[:, f]))
+                if np.sum(valid_mask) > 5:
+                    fc = G_wind[valid_mask, f]
+                    global_min = min(global_min, np.min(fc))
+                    global_max = max(global_max, np.max(fc))
+            
+            # Ensure valid range found
+            if global_min == float('inf') or global_max == float('-inf'):
+                global_min, global_max = 0, 1  # Fallback range
+            
+            print(f"   🎨 Using consistent color scale for polar plots: {global_min:.3f} to {global_max:.3f}")
+            
+            # Second pass: create polar plots with consistent scale
             for f in range(n_factors):
                 row = 1 + f // polar_cols  # Start from row 1 (after distributions)
                 col = f % polar_cols
@@ -4153,12 +4588,13 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
                     wd_rad = np.radians(wd)
                     
                     # Create polar scatter plot colored by factor contribution intensity
+                    # Use global scale for consistent color comparison across all factors
                     scatter = ax_polar.scatter(wd_rad, fc, c=fc, cmap='viridis', 
-                                             alpha=0.7, s=40, vmin=np.min(fc), vmax=np.max(fc))
+                                             alpha=0.7, s=40, vmin=global_min, vmax=global_max)
                     
                     # Add colorbar to show contribution scale
                     cbar = plt.colorbar(scatter, ax=ax_polar, shrink=0.6, pad=0.1)
-                    cbar.set_label(f'Factor {f+1} Contribution', fontsize=10)
+                    cbar.set_label('Factor Contribution\n(Global Scale)', fontsize=10)
                     
                     # Get correlation for title
                     with SuppressOutput():
@@ -4169,6 +4605,9 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
                     ax_polar.set_theta_zero_location('N')
                     ax_polar.set_theta_direction(-1)
                     ax_polar.grid(True, alpha=0.3)
+                    
+                    # Set consistent radial scale across all polar plots for better comparison
+                    ax_polar.set_ylim(0, global_max * 1.05)  # Slight margin above max
         
         # Factor contributions binned by wind direction (bottom left)
         bottom_row = total_rows - 2  # Second to last row
@@ -5524,110 +5963,55 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         
         node_colors = factor_colors[:self.factors] + species_colors
         
-        # Calculate node positions based on actual flow values to prevent overlapping
-        # Factors on left (x=0.01), species on right (x=0.99)
+        # Dynamic layout parameters to avoid vertical overlaps regardless of flow size
+        # Compute node padding and thickness in pixels based on figure height and node counts
+        layout_height_px = 900
+        top_margin_px = 80
+        bottom_margin_px = 50
+        available_px = max(200, layout_height_px - (top_margin_px + bottom_margin_px))
         
-        # Calculate flow-based node heights
-        # For factors: height proportional to total outgoing flow
-        factor_flows = np.sum(F_profiles, axis=1)  # Total flow from each factor
-        max_factor_flow = np.max(factor_flows) if np.max(factor_flows) > 0 else 1
+        left_nodes = self.factors
+        right_nodes = len(self.species_names)
+        max_nodes = max(left_nodes, right_nodes)
         
-        # For species: height proportional to total incoming flow
-        species_flows = np.sum(F_profiles, axis=0)  # Total flow to each species
-        max_species_flow = np.max(species_flows) if np.max(species_flows) > 0 else 1
+        # Start with desired thickness and compute pad to fit all nodes
+        thickness_px = 18
+        min_thickness_px = 12
+        min_pad_px = 8
         
-        # Calculate relative heights (0.02 to 0.15 range for visibility)
-        min_height = 0.02
-        max_height = 0.15
-        
-        factor_heights = min_height + (factor_flows / max_factor_flow) * (max_height - min_height)
-        species_heights = min_height + (species_flows / max_species_flow) * (max_height - min_height)
-        
-        print(f"   Factor heights: {factor_heights}")
-        print(f"   Species heights: {species_heights}")
-        
-        # Calculate cumulative positions to avoid overlaps
-        available_height = 0.9  # Use 90% of plot height (0.05 to 0.95)
-        
-        # Factor positions (left side) - stack from bottom with gaps
-        total_factor_height = np.sum(factor_heights)
-        n_factor_gaps = max(0, self.factors - 1)
-        gap_size = 0.02  # Minimum gap between nodes
-        total_required_factor_space = total_factor_height + n_factor_gaps * gap_size
-        
-        if total_required_factor_space <= available_height:
-            # Fit with equal gaps
-            extra_space = available_height - total_required_factor_space
-            adjusted_gap = gap_size + extra_space / max(1, n_factor_gaps)
+        # Adjust thickness/pad to fit within available height
+        if max_nodes > 1:
+            pad_px = int((available_px - max_nodes * thickness_px) / (max_nodes - 1))
         else:
-            # Compress gaps if needed
-            adjusted_gap = max(0.005, (available_height - total_factor_height) / max(1, n_factor_gaps))
+            pad_px = available_px - thickness_px
         
-        factor_y_positions = []
-        current_y = 0.05 + factor_heights[0] / 2  # Start with center of first node
-        
-        for i in range(self.factors):
-            if i == 0:
-                factor_y_positions.append(current_y)
+        if pad_px < min_pad_px:
+            # Reduce thickness to make room
+            thickness_px = max(min_thickness_px, int(available_px / max_nodes) - min_pad_px)
+            if max_nodes > 1:
+                pad_px = max(min_pad_px, int((available_px - max_nodes * thickness_px) / (max_nodes - 1)))
             else:
-                # Move to next position: half of previous height + gap + half of current height
-                current_y += factor_heights[i-1]/2 + adjusted_gap + factor_heights[i]/2
-                factor_y_positions.append(current_y)
+                pad_px = min_pad_px
         
-        # Species positions (right side) - same logic
-        total_species_height = np.sum(species_heights)
-        n_species_gaps = max(0, len(self.species_names) - 1)
-        total_required_species_space = total_species_height + n_species_gaps * gap_size
+        # Final safety clamp
+        pad_px = max(min_pad_px, pad_px)
         
-        if total_required_species_space <= available_height:
-            # Fit with equal gaps
-            extra_space = available_height - total_required_species_space
-            adjusted_species_gap = gap_size + extra_space / max(1, n_species_gaps)
-        else:
-            # Compress gaps if needed
-            adjusted_species_gap = max(0.005, (available_height - total_species_height) / max(1, n_species_gaps))
+        print(f"   🧮 Sankey layout: thickness={thickness_px}px, pad={pad_px}px, nodes_left={left_nodes}, nodes_right={right_nodes}, available_px={available_px}")
         
-        species_y_positions = []
-        current_y = 0.05 + species_heights[0] / 2  # Start with center of first node
-        
-        for i in range(len(self.species_names)):
-            if i == 0:
-                species_y_positions.append(current_y)
-            else:
-                # Move to next position: half of previous height + gap + half of current height
-                current_y += species_heights[i-1]/2 + adjusted_species_gap + species_heights[i]/2
-                species_y_positions.append(current_y)
-        
-        # Center the entire layout if it doesn't fill the available space
-        if len(factor_y_positions) > 0:
-            factor_span = factor_y_positions[-1] + factor_heights[-1]/2 - (factor_y_positions[0] - factor_heights[0]/2)
-            if factor_span < available_height:
-                offset = (available_height - factor_span) / 2
-                factor_y_positions = [y + offset for y in factor_y_positions]
-        
-        if len(species_y_positions) > 0:
-            species_span = species_y_positions[-1] + species_heights[-1]/2 - (species_y_positions[0] - species_heights[0]/2)
-            if species_span < available_height:
-                offset = (available_height - species_span) / 2
-                species_y_positions = [y + offset for y in species_y_positions]
-        
-        print(f"   Final factor positions: {factor_y_positions}")
-        print(f"   Final species positions: {species_y_positions}")
-        
+        # Fix node columns; let Plotly auto-position y to respect pad and avoid overlaps
         node_x = [0.01] * self.factors + [0.99] * len(self.species_names)
-        node_y = factor_y_positions + species_y_positions
         
-        # Create Sankey diagram with explicit positioning
+        
+        # Create Sankey diagram with optimized positioning (Plotly manages y to avoid overlaps)
         fig = go.Figure(data=[go.Sankey(
-            arrangement="fixed",  # Use fixed positioning
+            arrangement="snap",  # Let Plotly optimize y positions and avoid overlaps
             node=dict(
-                pad=15,
-                thickness=20,
+                pad=pad_px,
+                thickness=thickness_px,
                 line=dict(color="black", width=0.5),
                 label=all_labels,
                 color=node_colors,
-                x=node_x,
-                y=node_y
+                x=node_x
             ),
             link=dict(
                 source=sources,
@@ -5643,19 +6027,20 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
                 x=0.5,
                 font=dict(size=16)
             ),
-            font_size=12,
+            font_size=10,  # Slightly smaller font to fit better
             width=1200,
-            height=800,
+            height=900,  # Increased height to accommodate better spacing
+            margin=dict(t=80, b=50, l=50, r=50),  # Add top margin for annotations
             annotations=[
                 dict(
-                    text="Factors", x=0.01, y=1.02, xref="paper", yref="paper",
+                    text="Factors", x=0.01, y=0.98, xref="paper", yref="paper",
                     showarrow=False, font=dict(size=14, color="black"), 
-                    xanchor="left", yanchor="bottom"
+                    xanchor="left", yanchor="top"
                 ),
                 dict(
-                    text="Species", x=0.99, y=1.02, xref="paper", yref="paper",
+                    text="Species", x=0.99, y=0.98, xref="paper", yref="paper",
                     showarrow=False, font=dict(size=14, color="black"), 
-                    xanchor="right", yanchor="bottom"
+                    xanchor="right", yanchor="top"
                 )
             ]
         )
@@ -5672,14 +6057,14 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
             
             # First try with explicit format and engine specification
             try:
-                fig.write_image(str(png_path), format='png', width=1200, height=800, scale=2)
+                fig.write_image(str(png_path), format='png', width=1200, height=900, scale=2)
                 plot_files.append(png_path)
                 print(f"     ✅ Saved: sankey_diagram.png")
                 png_success = True
             except Exception as e1:
                 # Try without format specification
                 try:
-                    fig.write_image(str(png_path), width=1200, height=800, scale=2)
+                    fig.write_image(str(png_path), width=1200, height=900, scale=2)
                     plot_files.append(png_path)
                     print(f"     ✅ Saved: sankey_diagram.png (fallback method)")
                     png_success = True
@@ -6361,6 +6746,9 @@ python pmf_source_app.py MMF9 --robust-fit --robust-alpha 3.0 --factors 5
 # Species weighting to handle extreme concentration ranges (e.g., CH4 >> other species):
 python pmf_source_app.py MMF9 --species-weight CH4=5 --species-weight H2S=2 --uncertainty-mode epa
 
+# Weight-aware initialization with species weighting (addresses factor degeneracy):
+python pmf_source_app.py MMF9 --species-weight CH4=5 --weight-aware-init --uncertainty-mode epa
+
 =============================================================================
     """
     print(help_text)
@@ -6471,6 +6859,10 @@ def main():
     parser.add_argument('--species-weight', action='append', default=[],
                        help='Multiply uncertainties for specific species (e.g., --species-weight CH4=5 or --species-weight CH4=5,H2S=2). Applied after S/N adjustments. Can be used multiple times.')
     
+    # Species exclusion from analysis
+    parser.add_argument('--exclude-species', action='append', default=[],
+                       help='Remove specific species from PMF analysis entirely (e.g., --exclude-species CH4 or --exclude-species CH4,H2S). Case-insensitive. Can be used multiple times: --exclude-species CH4 --exclude-species H2S')
+    
     # ESAT Algorithm and Initialization Controls
     parser.add_argument('--method', choices=['ls-nmf', 'ws-nmf'], default='ls-nmf',
                        help='ESAT NMF method: ls-nmf (nonnegative, standard PMF) or ws-nmf (semi-NMF, allows negative W contributions) (default: ls-nmf)')
@@ -6488,6 +6880,14 @@ def main():
                        help='Hold the H (profile) matrix constant during training. Use with --delay-h to hold for N iterations then release.')
     parser.add_argument('--delay-h', type=int, default=-1,
                        help='Iterations to delay H matrix updates. When >0 and combined with --hold-h, holds H for N iterations then releases. (default: -1, disabled)')
+    
+    # Weight-aware initialization control
+    weight_init_group = parser.add_mutually_exclusive_group()
+    weight_init_group.add_argument('--weight-aware-init', dest='weight_aware_init', action='store_true',
+                          help='Enable weight-aware initialization for weighted species (auto-enabled if --species-weight is used)')
+    weight_init_group.add_argument('--no-weight-aware-init', dest='weight_aware_init', action='store_false',
+                          help='Disable weight-aware initialization even when species weights are applied')
+    parser.set_defaults(weight_aware_init=None)
     
     args = parser.parse_args()
     
@@ -6551,7 +6951,11 @@ def main():
             hold_h=args.hold_h,
             delay_h=args.delay_h,
             # Species-specific uncertainty weighting
-            species_weight=args.species_weight
+            species_weight=args.species_weight,
+            # Species exclusion from analysis
+            exclude_species=args.exclude_species,
+            # Weight-aware initialization control
+            weight_aware_init=args.weight_aware_init
         )
         
         # Override default parameters if specified
