@@ -1330,4 +1330,112 @@ python pmf_source_app.py MMF9 --species-weight CH4=5 --no-weight-aware-init
 
 **Next**: Run validation sweep on MMF9 January 2024 data to verify correlation improvements.
 
-**Git Commit**: [Insert commit hash after testing]
+**Git Commit**: [Commit in progress]
+
+## 2025-01-25 19:45 - 🎯 ADVANCED FEATURE: Weight-Aware PMF Initialization and Species Exclusion
+
+**Status**: **IMPLEMENTED** - Comprehensive solution for PMF factor degeneracy when using species uncertainty weighting, plus species exclusion capability.
+
+### 🎯 Primary Feature: Weight-Aware K-Means Initialization
+
+**Problem Addressed**: When using `--species-weight CH4=5`, PMF factor profiles became highly correlated instead of showing improved separation. Higher weight multipliers paradoxically increased factor correlation, indicating degeneracy in the optimization starting point.
+
+**Solution**: Custom initialization method that pre-scales concentration data by inverse uncertainty weights before k-means clustering:
+
+1. **Pre-scaling**: Scale concentration matrix columns by `1/weight_factor` for weighted species
+2. **K-means clustering**: Apply clustering on magnitude-balanced data  
+3. **Factor initialization**: Generate H (profiles) and W (contributions) from balanced centroids
+4. **Scale restoration**: Return to original concentration units for PMF training
+
+**CLI Integration**:
+- `--weight-aware-init`: Enable weight-aware initialization (auto-enabled when species weights used)
+- `--no-weight-aware-init`: Force disable for comparison testing
+- **Auto-Detection**: Automatically enabled when `--species-weight` parameters are specified
+- **Compatibility**: Forces single SA mode (BatchSA doesn't support custom initialization)
+
+### 🚫 Secondary Feature: Species Exclusion from Analysis
+
+**New Capability**: `--exclude-species` flag to completely remove species from PMF analysis
+
+**Usage Examples**:
+```bash
+# Single species exclusion
+python pmf_source_app.py MMF9 --exclude-species CH4
+
+# Multiple species (separate flags)
+python pmf_source_app.py MMF9 --exclude-species CH4 --exclude-species H2S
+
+# Multiple species (comma-separated)
+python pmf_source_app.py MMF9 --exclude-species CH4,H2S,NO2
+```
+
+**Features**:
+- Case-insensitive species matching with validation
+- Complete removal from concentration/uncertainty matrices before PMF
+- Provenance tracking via `*_species_exclusions.csv`
+- Dashboard integration with exclusion summary section
+
+### 🛠️ Technical Implementation
+
+**Weight-Aware Initialization** (`_weight_aware_initialize()` method):
+- Custom ESAT SA model initialization using public `initialize(H, W)` API
+- Forced Python update path (`sa_model.optimized = False`) to avoid dtype mismatch
+- K-means clustering on inverse-weight scaled concentration data
+- Preserves factor structure while balancing species magnitude influence
+
+**Species Exclusion** (`_parse_species_exclusions()` method):
+- Parsing and validation of exclusion specifications
+- Column filtering in `prepare_pmf_data()` before PMF matrices creation
+- Comprehensive provenance tracking and dashboard integration
+
+**Enhanced Dashboard Visualizations**:
+- Added relative factor profiles with logarithmic scale for multi-magnitude species
+- Dedicated PCA loadings plots when `--run-pca` flag used
+- Enhanced Sankey diagram layout with dynamic positioning to avoid overlaps
+- Species exclusion summary section in HTML dashboard
+
+### 📊 Expected Benefits
+
+**For Weight-Aware Initialization**:
+- Reduced factor profile correlations when using species uncertainty weighting
+- Better factor separation for datasets with extreme species concentration ranges  
+- Preserved model quality while improving factor distinctiveness
+- Addresses CH4 degeneracy issue (3 orders magnitude difference vs other species)
+
+**For Species Exclusion**:
+- Clean removal of problematic species that dominate PMF solutions
+- Alternative approach to uncertainty weighting for extreme cases
+- Comparison capability (include vs exclude problematic species)
+
+### 🧪 Usage Examples
+
+**Weight-Aware Initialization (Auto-enabled)**:
+```bash
+# Auto-enabled with species weighting:
+python pmf_source_app.py MMF9 --species-weight CH4=5 --uncertainty-mode epa
+
+# Force disable for comparison:
+python pmf_source_app.py MMF9 --species-weight CH4=5 --no-weight-aware-init
+```
+
+**Species Exclusion Approaches**:
+```bash
+# Complete exclusion approach:
+python pmf_source_app.py MMF9 --exclude-species CH4 --uncertainty-mode epa
+
+# Hybrid: exclude some, weight others:
+python pmf_source_app.py MMF9 --exclude-species H2S --species-weight CH4=3
+```
+
+### 🔧 Files Modified
+
+**Core Implementation**:
+- `pmf_source_app.py`: Weight-aware initialization, species exclusion, enhanced visualizations
+- `sweep_ch4_weight.py`: CH4 weighting sweep script for validation testing
+
+**Next Steps**: 
+1. Validation testing with MMF9 January 2024 data (baseline vs CH4=5 weighted comparison)
+2. H-profile correlation analysis to verify degeneracy resolution
+3. Advanced regularization techniques if further improvements needed
+
+**Git Commit**: [561ded9](https://github.com/tcpearce/mmf-pmf-analysis/commit/561ded9)
