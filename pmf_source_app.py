@@ -1030,7 +1030,7 @@ class MMFPMFAnalyzer:
             }
             burst_diagnostics.append(burst_diag)
             
-            print(f"   [CHART] Burst {burst_idx + 1} summary: max_rel_change={max_rel_change:.3e}, Qtrue={burst_diag['Qtrue']:.3f}")
+            print(f"   [SUMMARY] Burst {burst_idx + 1} summary: max_rel_change={max_rel_change:.3e}, Qtrue={burst_diag['Qtrue']:.3f}")
             
             # Stage 9: Track convergence diagnostics for each regulated species
             if diagnostics_available and self._reg_diagnostics:
@@ -1061,7 +1061,7 @@ class MMFPMFAnalyzer:
                 print(f"   [OK] Regularization converged in burst {burst_idx + 1}: max_rel_change={max_rel_change:.3e} < tol={self.reg_tol}")
                 break
             else:
-                print(f"   [ARROW] Continuing: max_rel_change={max_rel_change:.3e} > tol={self.reg_tol}")
+                print(f"   [CONTINUE] Continuing: max_rel_change={max_rel_change:.3e} > tol={self.reg_tol}")
         
         # Store diagnostics for later saving
         self._reg_burst_diagnostics = burst_diagnostics
@@ -1123,7 +1123,7 @@ class MMFPMFAnalyzer:
     def _display_station_info(self):
         """Display prominent analysis information banner."""
         print("\n" + "=" * 60)
-        print("[TEST] MMF PMF SOURCE APPORTIONMENT ANALYSIS (FIXED)")
+        print("[INFO] MMF PMF SOURCE APPORTIONMENT ANALYSIS (FIXED)")
         print("=" * 60)
         
         if self.station:
@@ -1140,7 +1140,7 @@ class MMFPMFAnalyzer:
             print(f"[STATION] Station: {display_name}")
         else:
             # Flexible data directory mode
-            print(f"[EMOJI] Data Directory: {self.data_dir}")
+            print(f"[DATA] Data Directory: {self.data_dir}")
             print(f"[SEARCH] Patterns: {self.patterns}")
             
         if self.start_date or self.end_date:
@@ -1225,7 +1225,7 @@ class MMFPMFAnalyzer:
             self.aggregation_method = meta.get('aggregation_method')
             self.min_valid_subsamples = int(meta.get('min_valid_subsamples')) if meta.get('min_valid_subsamples') else None
             if self.aggregation_timebase or self.aggregation_method:
-                print(f"[EMOJI] Aggregation metadata: timebase={self.aggregation_timebase}, method={self.aggregation_method}, min_valid={self.min_valid_subsamples}")
+                print(f"[META] Aggregation metadata: timebase={self.aggregation_timebase}, method={self.aggregation_method}, min_valid={self.min_valid_subsamples}")
         except Exception as e:
             self.aggregation_timebase = None
             self.aggregation_method = None
@@ -1297,9 +1297,10 @@ class MMFPMFAnalyzer:
         # Select all applicable species for PMF analysis
         if self.remove_voc:
             all_species = gas_species + particle_species
-            print(f"[EMOJI] VOC species excluded from PMF analysis")
+        print(f"[EXCLUDE] VOC species excluded from PMF analysis")
         else:
-            all_species = gas_species + particle_species + voc_species
+            # Use actual detected VOC column names instead of generic names
+            all_species = gas_species + particle_species + available_vocs
         
         # Select columns that exactly match target species (avoid auxiliary columns like 'n_*')
         pollutant_columns = [col for col in self.df.columns if col in all_species]
@@ -1325,7 +1326,7 @@ class MMFPMFAnalyzer:
             self._excluded_species_not_found = list(not_found_species)
             
             if excluded_columns:
-                print(f"[EMOJI] Excluding {len(excluded_columns)} species from PMF analysis: {excluded_columns}")
+                print(f"[EXCLUDE] Excluding {len(excluded_columns)} species from PMF analysis: {excluded_columns}")
                 pollutant_columns = remaining_columns
             else:
                 print(f"[WARN] No species matched exclusion list: {list(self.exclude_species_set)}")
@@ -1333,14 +1334,14 @@ class MMFPMFAnalyzer:
             if not_found_species:
                 print(f"[WARN] {len(not_found_species)} requested exclusions not found in data: {list(not_found_species)}")
         
-        print(f"[INFO] Final pollutants for PMF: {pollutant_columns}")
+        print(f"[SPECIES] Final pollutants for PMF: {pollutant_columns}")
         
         # Report data availability for different species types
         gas_cols = [col for col in pollutant_columns if any(gas in col for gas in gas_species)]
         voc_cols = [col for col in pollutant_columns if any(voc in col for voc in voc_species)]
         pm_cols = [col for col in pollutant_columns if any(pm in col for pm in particle_species)]
         
-        print(f"[DATA] Species breakdown:")
+        print(f"[SPECIES] Species breakdown:")
         print(f"  Gas species ({len(gas_cols)}): {gas_cols}")
         
         if not self.remove_voc:
@@ -1377,7 +1378,7 @@ class MMFPMFAnalyzer:
         if self.scale_units:
             self._standardize_units_to_ugm3(pollutant_columns)
         else:
-            print("[WARN]  Unit standardization disabled (--no-scale-units). Units will be used as-is.")
+            print("[UNITS] Unit standardization disabled (--no-scale-units). Units will be used as-is.")
         
         # Remove rows with too many missing values (EPA recommendation: >50% missing)
         missing_threshold = getattr(self, 'drop_row_threshold', 0.5)
@@ -2681,7 +2682,7 @@ class MMFPMFAnalyzer:
             # Select factor number with Q/DoF closest to 1.0 (EPA best practice)
             optimal_factors = min(q_dof_ratios.keys(), key=lambda nf: abs(q_dof_ratios[nf] - 1.0))
             self.factors = optimal_factors
-            print(f"[DATA] Optimal factors selected: {self.factors} (Q/DoF = {q_dof_ratios[optimal_factors]:.3f})")
+            print(f"[OPTIMIZE] Optimal factors selected: {self.factors} (Q/DoF = {q_dof_ratios[optimal_factors]:.3f})")
             
             # Store optimization results for plotting
             self.optimization_q_values = q_values.copy()
@@ -2766,7 +2767,7 @@ class MMFPMFAnalyzer:
         """
         Display Q-value interpretation in a user-friendly format.
         """
-        print("\n[DATA] Q-Value Analysis (EPA PMF Guidelines):")
+        print("\n[ANALYSIS] Q-Value Analysis (EPA PMF Guidelines):")
         print("=" * 50)
         print(f"Q(true): {interpretation['q_true']:.2f}")
         print(f"Q(robust): {interpretation['q_robust']:.2f}")
@@ -2779,9 +2780,9 @@ class MMFPMFAnalyzer:
         
         # EPA guidelines explanation
         print("EPA Q-Value Guidelines:")
-        print("  Q/DOF ≤ 1.5: Excellent fit")
-        print("  Q/DOF ≤ 2.0: Good fit")
-        print("  Q/DOF ≤ 3.0: Fair fit (may need refinement)")
+        print("  Q/DOF <= 1.5: Excellent fit")
+        print("  Q/DOF <= 2.0: Good fit")
+        print("  Q/DOF <= 3.0: Fair fit (may need refinement)")
         print("  Q/DOF > 3.0: Poor fit (review model/data)")
         print()
         
@@ -2796,7 +2797,7 @@ class MMFPMFAnalyzer:
         Create comprehensive PMF dashboard with seaborn styling.
         FIXED VERSION based on successful ESAT test.
         """
-        print("[DATA] Creating PMF dashboard...")
+        print("[DASHBOARD] Creating PMF dashboard...")
         
         # Suppress any potential matplotlib or numpy output during plotting
         import warnings
@@ -2816,7 +2817,7 @@ class MMFPMFAnalyzer:
         F_profiles = self.best_model.H  # Factor profiles (source signatures)  
         G_contributions = self.best_model.W  # Factor contributions (time series)
         
-        print(f"[DATA] Creating plots...")
+        print(f"[PLOTS] Creating plots...")
         print(f"   Factor profiles: {F_profiles.shape}")
         print(f"   Factor contributions: {G_contributions.shape}")
         
@@ -2835,6 +2836,9 @@ class MMFPMFAnalyzer:
             print(f"[SAVE] Saved factor profiles: {factor_profiles_file.name}")
         except Exception as e:
             print(f"[WARN] Could not save factor profiles: {e}")
+        
+        # Create basic PMF plots
+        plot_files = []
         
         # Compute and save closure metrics for mass balance analysis
         try:
@@ -2861,14 +2865,9 @@ class MMFPMFAnalyzer:
             print(f"[SAVE] Saved closure summary: {closure_file.name}")
             
             # Create closure plot
-            try:
-                closure_plot = self._plot_closure_summary(closure_df, group_summary, dashboard_dir)
-                plot_files.append(closure_plot)
-                print(f"   [OK] Saved: closure_summary.png")
-            except NameError:
-                # plot_files not available in this scope, create it
-                closure_plot = self._plot_closure_summary(closure_df, group_summary, dashboard_dir)
-                print(f"   [OK] Saved: closure_summary.png")
+            closure_plot = self._plot_closure_summary(closure_df, group_summary, dashboard_dir)
+            plot_files.append(closure_plot)
+            print(f"   [OK] Saved: closure_summary.png")
             
             # Store closure data for HTML dashboard
             self._closure_df = closure_df
@@ -2878,10 +2877,6 @@ class MMFPMFAnalyzer:
             print(f"[WARN] Could not compute closure metrics: {e}")
             self._closure_df = None
             self._group_summary = None
-        
-        
-        # Create basic PMF plots
-        plot_files = []
         
         try:
             # Plot 1: Factor Profiles - Dynamic subplot layout for all factors
@@ -3421,8 +3416,20 @@ class MMFPMFAnalyzer:
             'patterns': getattr(self, 'patterns', None),
             'start_date': self.start_date,
             'end_date': self.end_date,
+            'factors': getattr(self, 'factors', None),
+            'max_factors': getattr(self, 'max_factors', 10),
+            'models': getattr(self, 'models', 20),
             'output_dir': str(self.output_dir),
             'remove_voc': getattr(self, 'remove_voc', False),
+            'run_pca': getattr(self, 'run_pca', False),
+            'create_pdf': getattr(self, 'create_pdf', False),
+            'max_workers': getattr(self, 'max_workers', 2),
+            'scale_units': getattr(self, 'scale_units', True),
+            
+            # Data processing parameters
+            'drop_row_threshold': getattr(self, 'drop_row_threshold', 0.5),
+            'zero_as_bdl': getattr(self, 'zero_as_bdl', True),
+            'save_masks': getattr(self, 'save_masks', True),
             
             # EPA uncertainty parameters
             'uncertainty_mode': self.uncertainty_mode,
@@ -3451,11 +3458,23 @@ class MMFPMFAnalyzer:
             'init_norm': getattr(self, 'init_norm', True),
             'hold_h': getattr(self, 'hold_h', False),
             'delay_h': getattr(self, 'delay_h', -1),
+            'weight_aware_init': getattr(self, 'weight_aware_init', None),
             
             # Output controls
             'dashboard_snr_panel': getattr(self, 'dashboard_snr_panel', True),
             'write_diagnostics': self.write_diagnostics,
             'seed': self.seed,
+            'help_detail': getattr(self, 'help_detail', False),
+            
+            # Regularization parameters
+            'reg_species': getattr(self, 'reg_species', []),
+            'reg_lambda': getattr(self, 'reg_lambda', []),
+            'reg_template': getattr(self, 'reg_template', []),
+            'reg_template_file': getattr(self, 'reg_template_file', []),
+            'reg_bursts': getattr(self, 'reg_bursts', 5),
+            'reg_iter_per_burst': getattr(self, 'reg_iter_per_burst', 50),
+            'reg_tol': getattr(self, 'reg_tol', 1e-4),
+            'reg_elastic_l1': getattr(self, 'reg_elastic_l1', 0.0),
         }
         
         html_section = """
@@ -3469,7 +3488,7 @@ class MMFPMFAnalyzer:
         cmd_parts = ['python pmf_source_app.py']
         
         if cli_params['station']:
-            cmd_parts.append(f"--station {cli_params['station']}")
+            cmd_parts.append(f"{cli_params['station']}")
         if cli_params['data_dir']:
             cmd_parts.append(f'--data-dir "{cli_params["data_dir"]}"')
         if cli_params['patterns']:
@@ -3478,10 +3497,30 @@ class MMFPMFAnalyzer:
             cmd_parts.append(f"--start-date {cli_params['start_date']}")
         if cli_params['end_date']:
             cmd_parts.append(f"--end-date {cli_params['end_date']}")
-        if cli_params['output_dir'] and cli_params['output_dir'] != 'pmf_results':
+        if cli_params['factors']:
+            cmd_parts.append(f"--factors {cli_params['factors']}")
+        elif cli_params['max_factors'] != 10:
+            cmd_parts.append(f"--max-factors {cli_params['max_factors']}")
+        if cli_params['models'] != 20:
+            cmd_parts.append(f"--models {cli_params['models']}")
+        if cli_params['max_workers'] != 2:
+            cmd_parts.append(f"--max-workers {cli_params['max_workers']}")
+        if cli_params['output_dir'] and cli_params['output_dir'] != 'pmf_results_esat':
             cmd_parts.append(f'--output-dir "{cli_params["output_dir"]}"')
+        if cli_params['run_pca']:
+            cmd_parts.append('--run-pca')
+        if cli_params['create_pdf']:
+            cmd_parts.append('--create-pdf')
         if cli_params['remove_voc']:
             cmd_parts.append('--remove-voc')
+        if not cli_params['scale_units']:
+            cmd_parts.append('--no-scale-units')
+        if cli_params['drop_row_threshold'] != 0.5:
+            cmd_parts.append(f"--drop-row-threshold {cli_params['drop_row_threshold']}")
+        if not cli_params['zero_as_bdl']:
+            cmd_parts.append('--no-zero-as-bdl')
+        if not cli_params['save_masks']:
+            cmd_parts.append('--no-save-masks')
         if cli_params['uncertainty_mode'] != 'legacy':
             cmd_parts.append(f"--uncertainty-mode {cli_params['uncertainty_mode']}")
         if cli_params['snr_enable']:
@@ -3494,6 +3533,10 @@ class MMFPMFAnalyzer:
             cmd_parts.append('--hold-h')
         if not cli_params['init_norm']:
             cmd_parts.append('--no-init-norm')
+        if cli_params['weight_aware_init'] is True:
+            cmd_parts.append('--weight-aware-init')
+        elif cli_params['weight_aware_init'] is False:
+            cmd_parts.append('--no-weight-aware-init')
         
         # Add species weighting parameters
         if hasattr(self, '_species_weights_applied') and self._species_weights_applied:
@@ -3512,17 +3555,29 @@ class MMFPMFAnalyzer:
                 cmd_parts.append(f'--reg-lambda {reg_item["lambda"]}')
                 cmd_parts.append(f'--reg-template {reg_item["template_type"]}')
         
+        # Add help detail flag if enabled  
+        if cli_params['help_detail']:
+            cmd_parts.append('--help-detail')
+        
         # Add other non-default parameters
         non_defaults = {
-'uncertainty_epsilon': (1e-12, cli_params['uncertainty_epsilon']),
+            'uncertainty_epsilon': (1e-12, cli_params['uncertainty_epsilon']),
             'legacy_min_u': (0.1, cli_params['legacy_min_u']),
             'snr_weak_threshold': (2.0, cli_params['snr_weak_threshold']),
             'snr_bad_threshold': (0.2, cli_params['snr_bad_threshold']),
+            'snr_bdl_weak_frac': (0.6, cli_params['snr_bdl_weak_frac']),
+            'snr_bdl_bad_frac': (0.8, cli_params['snr_bdl_bad_frac']),
+            'snr_missing_weak_frac': (0.2, cli_params['snr_missing_weak_frac']),
+            'snr_missing_bad_frac': (0.4, cli_params['snr_missing_bad_frac']),
             'robust_alpha': (4.0, cli_params['robust_alpha']),
             'seed': (42, cli_params['seed']),
             'method': ('ls-nmf', cli_params['method']),
             'init_method': ('column_mean', cli_params['init_method']),
             'delay_h': (-1, cli_params['delay_h']),
+            'reg_bursts': (5, cli_params['reg_bursts']),
+            'reg_iter_per_burst': (50, cli_params['reg_iter_per_burst']),
+            'reg_tol': (1e-4, cli_params['reg_tol']),
+            'reg_elastic_l1': (0.0, cli_params['reg_elastic_l1']),
         }
         
         for param, (default, value) in non_defaults.items():
@@ -3543,20 +3598,71 @@ class MMFPMFAnalyzer:
         
         # Parameter descriptions - separate values and descriptions
         param_info = {
-'uncertainty_mode': (cli_params["uncertainty_mode"], 'Uncertainty calculation method'),
+            # Core analysis parameters
+            'station': (cli_params.get('station', 'N/A'), 'Station identifier (positional argument)'),
+            'data_dir': (cli_params.get('data_dir', 'N/A'), 'Data directory (alternative to station)'),
+            'patterns': (cli_params.get('patterns', 'N/A'), 'File patterns to match'),
+            'start_date': (cli_params.get('start_date', 'All data'), 'Analysis start date (YYYY-MM-DD)'),
+            'end_date': (cli_params.get('end_date', 'All data'), 'Analysis end date (YYYY-MM-DD)'),
+            'factors': (cli_params.get('factors', 'Auto-optimized'), 'Number of PMF factors'),
+            'max_factors': (cli_params.get('max_factors', 10), 'Maximum factors to test during optimization'),
+            'models': (cli_params.get('models', 20), 'Number of PMF models to run'),
+            'max_workers': (cli_params.get('max_workers', 2), 'Maximum parallel processes'),
+            'output_dir': (cli_params.get('output_dir', 'pmf_results_esat'), 'Output directory'),
+            'run_pca': (cli_params.get('run_pca', False), 'Run PCA analysis for comparison'),
+            'create_pdf': (cli_params.get('create_pdf', False), 'Create PDF version of dashboard'),
+            
+            # Data processing parameters
+            'remove_voc': (cli_params.get('remove_voc', False), 'Remove VOC species from analysis'),
+            'scale_units': (cli_params.get('scale_units', True), 'Apply unit standardization to μg/m³'),
+            'drop_row_threshold': (cli_params.get('drop_row_threshold', 0.5), 'Row drop threshold for missing values'),
+            'zero_as_bdl': (cli_params.get('zero_as_bdl', True), 'Treat zeros as below detection limit'),
+            'save_masks': (cli_params.get('save_masks', True), 'Save BDL and missing mask CSVs'),
+            
+            # Uncertainty parameters
+            'uncertainty_mode': (cli_params["uncertainty_mode"], 'Uncertainty calculation method'),
+            'uncertainty_ef_mdl': (cli_params.get('uncertainty_ef_mdl') or 'Built-in values', 'EF/MDL data source'),
+            'uncertainty_epsilon': (cli_params.get('uncertainty_epsilon', 1e-12), 'Numerical uncertainty floor'),
+            'legacy_min_u': (cli_params.get('legacy_min_u', 0.1), 'Minimum uncertainty (legacy mode)'),
+            'uncertainty_bdl_policy': (cli_params.get('uncertainty_bdl_policy', 'five-sixth-mdl'), 'BDL uncertainty policy'),
+            
+            # S/N categorization parameters
+            'snr_enable': (cli_params["snr_enable"], 'EPA S/N-based feature categorization'),
+            'snr_weak_threshold': (cli_params["snr_weak_threshold"], 'S/N threshold for weak species'),
+            'snr_bad_threshold': (cli_params["snr_bad_threshold"], 'S/N threshold for bad species'),
+            'snr_bdl_weak_frac': (cli_params.get('snr_bdl_weak_frac', 0.6), 'BDL fraction for weak categorization'),
+            'snr_bdl_bad_frac': (cli_params.get('snr_bdl_bad_frac', 0.8), 'BDL fraction for bad categorization'),
+            'snr_missing_weak_frac': (cli_params.get('snr_missing_weak_frac', 0.2), 'Missing fraction for weak categorization'),
+            'snr_missing_bad_frac': (cli_params.get('snr_missing_bad_frac', 0.4), 'Missing fraction for bad categorization'),
+            'exclude_bad': (cli_params["exclude_bad"], 'Exclude bad species from analysis'),
+            
+            # ESAT algorithm parameters
             'method': (cli_params['method'], 'ESAT NMF algorithm (ls-nmf or ws-nmf)'),
             'init_method': (cli_params['init_method'], 'Matrix initialization method'),
             'init_norm': (cli_params['init_norm'], 'Normalize data before kmeans initialization'),
             'hold_h': (cli_params['hold_h'], 'Hold H (profile) matrix constant during training'),
             'delay_h': (cli_params['delay_h'], 'Hold H matrix for N iterations (-1 = disabled)'),
-            'snr_enable': (cli_params["snr_enable"], 'EPA S/N-based feature categorization'),
+            'weight_aware_init': (cli_params.get('weight_aware_init', 'Auto'), 'Weight-aware initialization for species weighting'),
+            
+            # Robust training parameters
             'robust_fit': (cli_params['robust_fit'], 'Use robust loss during SA training (fallback only)'),
             'robust_alpha': (cli_params['robust_alpha'], 'Robust cutoff alpha for scaled residuals'),
-            'snr_weak_threshold': (cli_params["snr_weak_threshold"], 'S/N threshold for weak species'),
-            'snr_bad_threshold': (cli_params["snr_bad_threshold"], 'S/N threshold for bad species'),
-            'exclude_bad': (cli_params["exclude_bad"], 'Exclude bad species from analysis'),
-            'seed': (cli_params["seed"], 'Random seed for reproducibility'),
+            
+            # Output and diagnostics
+            'dashboard_snr_panel': (cli_params.get('dashboard_snr_panel', True), 'Include S/N panels in dashboard'),
             'write_diagnostics': (cli_params["write_diagnostics"], 'Write diagnostic CSV files'),
+            'seed': (cli_params["seed"], 'Random seed for reproducibility'),
+            'help_detail': (cli_params.get('help_detail', False), 'Show detailed CLI help'),
+            
+            # Regularization parameters
+            'reg_species': (', '.join(cli_params.get('reg_species', [])) or 'None', 'Species to regularize'),
+            'reg_lambda': (', '.join(map(str, cli_params.get('reg_lambda', []))) or 'Default', 'Regularization strength per species'),
+            'reg_template': (', '.join(cli_params.get('reg_template', [])) or 'zero', 'Template type per species'),
+            'reg_template_file': (', '.join(cli_params.get('reg_template_file', [])) or 'None', 'Template CSV files'),
+            'reg_bursts': (cli_params.get('reg_bursts', 5), 'Number of train->prox cycles'),
+            'reg_iter_per_burst': (cli_params.get('reg_iter_per_burst', 50), 'Max iterations per burst'),
+            'reg_tol': (cli_params.get('reg_tol', 1e-4), 'Early stop tolerance'),
+            'reg_elastic_l1': (cli_params.get('reg_elastic_l1', 0.0), 'Elastic-net L1 penalty'),
         }
         
         # Add species weighting if any applied
@@ -3574,7 +3680,7 @@ class MMFPMFAnalyzer:
                     <tr><td>--{param.replace('_', '-')}</td><td>{value}</td><td>{description}</td></tr>
             """
         
-        html_section += """
+        html_section += f"""
                 </table>
                 <p><small><em>Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</em></small></p>
             </div>
@@ -3640,7 +3746,7 @@ class MMFPMFAnalyzer:
         if self.uncertainty_mode == 'epa':
             html_content += f"""
             <div class="epa-section">
-                <h2>[EMOJI] EPA Uncertainty Policy (PMF 5.0)</h2>
+                <h2>[UNCERTAINTY MODE] EPA Uncertainty Policy (PMF 5.0)</h2>
                 <ul>
                     <li><strong>Above MDL:</strong> U = √((EF × conc)2 + (0.5 × MDL)2)</li>
                     <li><strong>BDL Cases:</strong> V = MDL/2, U = {self.uncertainty_bdl_policy.replace('-', ' ').title()}</li>
@@ -3653,7 +3759,7 @@ class MMFPMFAnalyzer:
         else:
             html_content += f"""
             <div class="epa-section">
-                <h2>[EMOJI] Legacy Uncertainty Policy</h2>
+                <h2>[UNCERTAINTY MODE] Legacy Uncertainty Policy</h2>
                 <ul>
                     <li><strong>Method:</strong> Fixed MDL/Error Fraction table</li>
                     <li><strong>Above MDL:</strong> U = √((EF × conc)2 + MDL2)</li>
@@ -3760,7 +3866,7 @@ class MMFPMFAnalyzer:
         if hasattr(self, '_excluded_species_applied') and self._excluded_species_applied:
             html_content += f"""
             <div class="epa-section">
-                <h2>[EMOJI] Species Exclusions</h2>
+                <h2>[EXCLUSIONS] Species Exclusions</h2>
                 <p>The following species were completely removed from PMF analysis via the --exclude-species flag:</p>
                 <table>
                     <tr><th>Species</th><th>Reason</th></tr>
@@ -3854,13 +3960,16 @@ class MMFPMFAnalyzer:
             
             # Add interpretation guide
             html_content += f"""
-                <h3>Interpretation Guide:</h3>
-                <ul>
-                    <li><strong>Closure %:</strong> (Reconstructed Sum / Measured Sum) × 100. Values near 100% indicate good fit.</li>
-                    <li><strong>Weighted Closure %:</strong> Same calculation but weighted by 1/uncertainty². More robust to outliers.</li>
-                    <li><strong>Red bars:</strong> Regularized species (expected to show closure reduction as λ increases).</li>
-                    <li><strong>Q Share %:</strong> Fraction of total model Q contributed by each species (indicates fit difficulty).</li>
-                </ul>
+            <h3>Interpretation Guide:</h3>
+            <ul>
+                <li><strong>Closure %:</strong> (Reconstructed Sum / Measured Sum) × 100. Values near 100% indicate good fit.</li>
+                <li><strong>Weighted Closure %:</strong> Same calculation but weighted by 1/uncertainty². More robust to outliers.</li>
+                <li><strong>Red bars:</strong> Regularized species (expected to show closure reduction as λ increases).</li>
+                <li><strong>Q Share %:</strong> Fraction of total model Q contributed by each species (indicates fit difficulty).</li>
+            </ul>
+            """
+            
+            html_content += f"""
                 <p><strong>Files:</strong> See <code>{self.filename_prefix}_closure_summary.csv</code> for detailed per-species metrics.</p>
             </div>
             """
@@ -4743,9 +4852,9 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         
         # Add explanatory text
         textstr = ('EPA PMF 5.0 Guidelines:\n'
-                  'Q/DoF ≤ 1.5: Excellent fit\n'
-                  'Q/DoF ≤ 2.0: Good fit\n'
-                  'Q/DoF ≤ 3.0: Fair fit\n'
+                  'Q/DoF <= 1.5: Excellent fit\n'
+                  'Q/DoF <= 2.0: Good fit\n'
+                  'Q/DoF <= 3.0: Fair fit\n'
                   'Q/DoF > 3.0: Poor fit')
         props = dict(boxstyle='round', facecolor='lightblue', alpha=0.5)
         ax1.text(0.02, 0.98, textstr, transform=ax1.transAxes, fontsize=8,

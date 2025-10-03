@@ -149,7 +149,7 @@ class SNRCategorizer:
         Returns:
             Tuple of (snr_metrics, categories, reasoning)
         """
-        print("🔍 Computing S/N ratios and categorizing features...")
+        print("[SNR] Computing S/N ratios and categorizing features...")
         
         species_names = concentrations_df.columns.tolist()
         snr_metrics = {}
@@ -157,7 +157,7 @@ class SNRCategorizer:
         reasoning = {}
         
         for species in species_names:
-            print(f"   📊 Analyzing {species}...")
+            print(f"   [ANALYZE] {species}...")
             
             # Get data arrays
             conc_data = concentrations_df[species].values
@@ -204,8 +204,8 @@ class SNRCategorizer:
             reasoning[species] = reasons
             
             # Display results
-            status_icon = "✅" if category == 'strong' else "⚠️" if category == 'weak' else "❌"
-            print(f"      {status_icon} S/N = {snr:.3f}, category = {category}")
+            status_text = "[STRONG]" if category == 'strong' else "[WEAK]" if category == 'weak' else "[BAD]"
+            print(f"      {status_text} S/N = {snr:.3f}, category = {category}")
             print(f"         Data: {quality['valid_count']} valid, {quality['bdl_count']} BDL, {quality['missing_count']} missing")
             if len(reasons) > 0:
                 print(f"         Reasons: {', '.join(reasons)}")
@@ -220,7 +220,7 @@ class SNRCategorizer:
         for cat in categories.values():
             category_counts[cat] += 1
             
-        print(f"\n📊 Categorization Summary:")
+        print(f"\n[SNR-SUMMARY] Categorization Summary:")
         print(f"   Strong: {category_counts['strong']} species")
         print(f"   Weak: {category_counts['weak']} species") 
         print(f"   Bad: {category_counts['bad']} species")
@@ -284,10 +284,10 @@ class SNRCategorizer:
             Dictionary of applied categories
         """
         if not hasattr(data_handler, 'set_category'):
-            print("⚠️ ESAT DataHandler does not support set_category - categories not applied")
+            print("[WARN] ESAT DataHandler does not support set_category - categories not applied")
             return self.categories
             
-        print("🔧 Applying categories to ESAT DataHandler...")
+        print("[APPLY] Applying categories to ESAT DataHandler...")
         applied = {}
         
         for species, category in self.categories.items():
@@ -296,19 +296,19 @@ class SNRCategorizer:
                     # Exclude bad features entirely
                     data_handler.set_category(species, 'bad')
                     applied[species] = 'excluded'
-                    print(f"   ❌ {species}: excluded (bad)")
+                    print(f"   [BAD] {species}: excluded (bad)")
                 elif category == 'weak':
                     # Mark as weak (ESAT will triple uncertainty)
                     data_handler.set_category(species, 'weak')
                     applied[species] = 'weak'
-                    print(f"   ⚠️ {species}: marked weak (uncertainty tripled)")
+                    print(f"   [WEAK] {species}: marked weak (uncertainty tripled)")
                 else:
                     # Keep as strong (no changes)
                     applied[species] = 'strong'
-                    print(f"   ✅ {species}: kept strong")
+                    print(f"   [STRONG] {species}: kept strong")
                     
             except Exception as e:
-                print(f"   ⚠️ {species}: failed to apply category - {e}")
+                print(f"   [ERROR] {species}: failed to apply category - {e}")
                 applied[species] = 'failed'
         
         return applied
@@ -322,7 +322,7 @@ class SNRCategorizer:
             filename_prefix: Prefix for filenames
         """
         if not self.snr_metrics:
-            print("⚠️ No S/N metrics to save")
+            print("[WARN] No S/N metrics to save")
             return
             
         try:
@@ -345,7 +345,7 @@ class SNRCategorizer:
                 
             metrics_df = pd.DataFrame(metrics_data)
             metrics_df.to_csv(metrics_file, index=False)
-            print(f"💾 Saved S/N metrics: {metrics_file}")
+            print(f"[SAVE] Saved S/N metrics: {metrics_file}")
             
             # Save categories and reasoning
             categories_file = output_dir / f"{filename_prefix}_species_categories.csv"
@@ -364,10 +364,10 @@ class SNRCategorizer:
                 
             categories_df = pd.DataFrame(categories_data)
             categories_df.to_csv(categories_file, index=False)
-            print(f"💾 Saved species categories: {categories_file}")
+            print(f"[SAVE] Saved species categories: {categories_file}")
             
         except Exception as e:
-            print(f"⚠️ Failed to save diagnostics: {e}")
+            print(f"[ERROR] Failed to save diagnostics: {e}")
     
     def get_summary(self) -> Dict:
         """Get summary of S/N categorization results."""

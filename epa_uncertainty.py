@@ -107,7 +107,7 @@ class EPAUncertaintyCalculator:
                     'unit': str(row['unit'])
                 }
                 
-            print(f"✅ Loaded EF/MDL data for {len(self.ef_mdl_data)} species from {csv_path}")
+            print(f"[OK] Loaded EF/MDL data for {len(self.ef_mdl_data)} species from {csv_path}")
             return True
             
         except Exception as e:
@@ -243,7 +243,7 @@ class EPAUncertaintyCalculator:
         """
         uncertainties_df = pd.DataFrame(index=concentrations_df.index)
         
-        print(f"🧮 Calculating EPA uncertainties for {len(concentrations_df.columns)} species...")
+        print(f"[CALC] Calculating EPA uncertainties for {len(concentrations_df.columns)} species...")
         
         for species in concentrations_df.columns:
             # Calculate base EPA uncertainties
@@ -258,11 +258,11 @@ class EPAUncertaintyCalculator:
                     epa_uncertainties = self.apply_aggregation_scaling(
                         epa_uncertainties, count_values
                     )
-                    print(f"   ✅ {species}: EPA + 1/√n scaling applied")
+                    print(f"   [OK] {species}: EPA + 1/√n scaling applied")
                 else:
-                    print(f"   ⚠️ {species}: EPA only (no count data for scaling)")
+                    print(f"   [WARN] {species}: EPA only (no count data for scaling)")
             else:
-                print(f"   ✅ {species}: EPA formula applied")
+                print(f"   [OK] {species}: EPA formula applied")
             
             uncertainties_df[species] = epa_uncertainties
         
