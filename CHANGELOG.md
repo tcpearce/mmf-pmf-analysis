@@ -1970,7 +1970,7 @@ Generated on 2025-10-03 15:26:21
 
 **Impact**: PMF dashboard reports now provide complete closure analysis visualization matching the interpretation guide text, enabling proper model validation.
 
-**Git Commit**: [To be added after commit]
+**Git Commit**: f500872
 
 ## 2025-10-03 15:48 - ✅ FIXED: Missing CLI Parameters in Dashboard Reproducibility Section
 
@@ -2022,7 +2022,7 @@ Generated on 2025-10-03 15:26:21
 
 **Impact**: Dashboard reports now provide complete CLI parameter coverage for full analysis reproducibility. Users can copy-paste the generated command and reproduce identical results.
 
-**Git Commit**: [To be added after commit]
+**Git Commit**: f500872
 
 ## 2025-10-03 15:55 - ✅ COMPLETED: Full CLI Parameter Coverage (All 58 Flags)
 
@@ -2088,7 +2088,7 @@ Generated on 2025-10-03 15:26:21
 
 **Impact**: Dashboard reports now provide 100% complete CLI parameter coverage. Every single flag from the argument parser is represented in both the command reproduction and parameter details sections, ensuring perfect reproducibility.
 
-**Git Commit**: [To be added after commit]
+**Git Commit**: f500872
 
 ## 2025-10-03 16:07 - ✅ FIXED: VOC Species with Specific Names Not Appearing in Dashboard
 
@@ -2126,7 +2126,7 @@ Generated on 2025-10-03 15:26:21
 
 **Impact**: PMF analysis now properly includes all VOC species with specific chemical names, providing more accurate source apportionment for volatile organic compounds.
 
-**Git Commit**: [To be added after commit]
+**Git Commit**: f500872
 
 ## 2025-10-03 16:15 - ✅ IMPROVED: Print Statement Labels for Better User Experience
 
@@ -2183,4 +2183,4 @@ Generated on 2025-10-03 15:26:21
 
 **Impact**: Console output now provides clear, accurate labeling that helps users understand what each message represents, improving the overall user experience and making debugging easier.
 
-**Git Commit**: [To be added after commit]
+**Git Commit**: f500872
