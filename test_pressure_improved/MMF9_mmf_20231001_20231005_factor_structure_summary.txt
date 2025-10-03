@@ -1,0 +1,54 @@
+Factor Structure Diagnostics Summary
+Generated: 2025-10-03 18:18:48
+==================================================
+
+Model Information:
+  Factors: 3
+  Species: 15
+  Samples: 1123
+  Q(true): 10853.67
+  Q(robust): 10309.11
+
+Sparsity Metrics:
+  W Matrix (Contributions):
+    Sparsity (< 1%): 0.017
+    Sparsity (< 5%): 0.017
+    Mean Gini: 0.315
+  H Matrix (Profiles):
+    Sparsity (< 1%): 0.200
+    Sparsity (< 5%): 0.444
+    Mean Gini: 0.857
+
+Correlation Analysis:
+  W Correlations (Time Series):
+    Max Off-Diagonal: 0.366
+    Mean Off-Diagonal: 0.341
+  H Correlations (Profiles):
+    Max Off-Diagonal: 1.000
+    Mean Off-Diagonal: 0.432
+
+Individual Factor Diagnostics:
+  Factor 1:
+    W Variance: 57.567
+    W Mean: 8.730
+    W Sparsity: 0.013
+    H Sparsity: 0.267
+    Dominant Species: NOX
+    Max H Loading: 1.797
+    H Gini: 0.744
+  Factor 2:
+    W Variance: 1.442
+    W Mean: 4.108
+    W Sparsity: 0.000
+    H Sparsity: 0.133
+    Dominant Species: CH4
+    Max H Loading: 321.029
+    H Gini: 0.931
+  Factor 3:
+    W Variance: 19.383
+    W Mean: 6.738
+    W Sparsity: 0.037
+    H Sparsity: 0.200
+    Dominant Species: CH4
+    Max H Loading: 39.147
+    H Gini: 0.896

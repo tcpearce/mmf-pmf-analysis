@@ -1,0 +1,78 @@
+Factor Structure Diagnostics Summary
+Generated: 2025-10-03 16:22:46
+==================================================
+
+Model Information:
+  Factors: 6
+  Species: 13
+  Samples: 8241
+  Q(true): 9174.39
+  Q(robust): 9169.87
+
+Sparsity Metrics:
+  W Matrix (Contributions):
+    Sparsity (< 1%): 0.011
+    Sparsity (< 5%): 0.024
+    Mean Gini: 0.447
+  H Matrix (Profiles):
+    Sparsity (< 1%): 0.346
+    Sparsity (< 5%): 0.449
+    Mean Gini: 0.741
+
+Correlation Analysis:
+  W Correlations (Time Series):
+    Max Off-Diagonal: 0.841
+    Mean Off-Diagonal: 0.188
+  H Correlations (Profiles):
+    Max Off-Diagonal: 0.721
+    Mean Off-Diagonal: 0.294
+
+Individual Factor Diagnostics:
+  Factor 1:
+    W Variance: 0.750
+    W Mean: 0.838
+    W Sparsity: 0.010
+    H Sparsity: 0.385
+    Dominant Species: NOX
+    Max H Loading: 6.935
+    H Gini: 0.816
+  Factor 2:
+    W Variance: 2.358
+    W Mean: 1.668
+    W Sparsity: 0.014
+    H Sparsity: 0.385
+    Dominant Species: PM1 FIDAS
+    Max H Loading: 3.862
+    H Gini: 0.747
+  Factor 3:
+    W Variance: 0.183
+    W Mean: 0.389
+    W Sparsity: 0.010
+    H Sparsity: 0.385
+    Dominant Species: NO2
+    Max H Loading: 3.272
+    H Gini: 0.617
+  Factor 4:
+    W Variance: 0.625
+    W Mean: 0.473
+    W Sparsity: 0.012
+    H Sparsity: 0.231
+    Dominant Species: H2S
+    Max H Loading: 3.141
+    H Gini: 0.665
+  Factor 5:
+    W Variance: 0.230
+    W Mean: 0.614
+    W Sparsity: 0.013
+    H Sparsity: 0.231
+    Dominant Species: NOX
+    Max H Loading: 13.917
+    H Gini: 0.821
+  Factor 6:
+    W Variance: 0.765
+    W Mean: 1.205
+    W Sparsity: 0.006
+    H Sparsity: 0.462
+    Dominant Species: TSP FIDAS
+    Max H Loading: 12.306
+    H Gini: 0.780

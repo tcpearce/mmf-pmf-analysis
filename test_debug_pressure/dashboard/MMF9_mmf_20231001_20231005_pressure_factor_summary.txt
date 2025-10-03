@@ -1,0 +1,54 @@
+MMF9 Pressure-Factor Analysis Summary
+==================================================
+
+Total matched data points: 1123
+Pressure columns analyzed: Pressure
+
+Pressure Statistics:
+  Range: 996.0 - 1011.0 hPa
+  Mean: 1005.1 hPa
+  Median: 1005.0 hPa
+  Std deviation: 4.1 hPa
+
+Factor-Pressure Correlations:
+------------------------------
+Factor 1:
+  Mean contribution: 8.730
+  Std deviation: 7.587
+  Correlation with pressure: 0.309
+  P-value: 1.181e-09
+  Interpretation: weak positive correlation, highly significant (***)
+
+Factor 2:
+  Mean contribution: 4.108
+  Std deviation: 1.201
+  Correlation with pressure: -0.215
+  P-value: 2.974e-05
+  Interpretation: very weak negative correlation, highly significant (***)
+
+Factor 3:
+  Mean contribution: 6.738
+  Std deviation: 4.403
+  Correlation with pressure: -0.183
+  P-value: 3.867e-04
+  Interpretation: very weak negative correlation, highly significant (***)
+
+Environmental Interpretation Notes:
+-----------------------------------
+• Strong positive pressure correlation may indicate:
+  - High pressure system influences (stable conditions)
+  - Reduced atmospheric mixing
+  - Accumulation of local emissions
+  - Anticyclonic weather patterns
+
+• Strong negative pressure correlation may indicate:
+  - Low pressure system influences (unstable conditions)
+  - Enhanced atmospheric mixing and ventilation
+  - Storm/precipitation scavenging effects
+  - Cyclonic weather patterns with dilution
+
+• Factors with weak pressure correlation may indicate:
+  - Sources independent of meteorological conditions
+  - Industrial sources with constant emissions
+  - Indoor/sheltered emission sources
+  - Regional background contributions

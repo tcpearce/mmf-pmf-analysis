@@ -1,0 +1,75 @@
+MMF9 Pressure-Factor Analysis Summary
+==================================================
+
+Total matched data points: 7984
+Pressure columns analyzed: Pressure
+
+Pressure Statistics:
+  Range: 960.0 - 1015.0 hPa
+  Mean: 992.9 hPa
+  Median: 997.0 hPa
+  Std deviation: 15.2 hPa
+
+Factor-Pressure Correlations:
+------------------------------
+Factor 1:
+  Mean contribution: 1.470
+  Std deviation: 1.451
+  Correlation with pressure: -0.135
+  P-value: 3.023e-12
+  Interpretation: very weak negative correlation, highly significant (***)
+
+Factor 2:
+  Mean contribution: 0.684
+  Std deviation: 1.103
+  Correlation with pressure: 0.061
+  P-value: 1.578e-03
+  Interpretation: very weak positive correlation, very significant (**)
+
+Factor 3:
+  Mean contribution: 0.915
+  Std deviation: 0.573
+  Correlation with pressure: 0.193
+  P-value: 1.800e-23
+  Interpretation: very weak positive correlation, highly significant (***)
+
+Factor 4:
+  Mean contribution: 0.646
+  Std deviation: 0.437
+  Correlation with pressure: 0.005
+  P-value: 8.063e-01
+  Interpretation: very weak positive correlation, not significant (ns)
+
+Factor 5:
+  Mean contribution: 0.601
+  Std deviation: 0.655
+  Correlation with pressure: -0.004
+  P-value: 8.521e-01
+  Interpretation: very weak negative correlation, not significant (ns)
+
+Factor 6:
+  Mean contribution: 0.672
+  Std deviation: 1.716
+  Correlation with pressure: 0.051
+  P-value: 8.680e-03
+  Interpretation: very weak positive correlation, very significant (**)
+
+Environmental Interpretation Notes:
+-----------------------------------
+• Strong positive pressure correlation may indicate:
+  - High pressure system influences (stable conditions)
+  - Reduced atmospheric mixing
+  - Accumulation of local emissions
+  - Anticyclonic weather patterns
+
+• Strong negative pressure correlation may indicate:
+  - Low pressure system influences (unstable conditions)
+  - Enhanced atmospheric mixing and ventilation
+  - Storm/precipitation scavenging effects
+  - Cyclonic weather patterns with dilution
+
+• Factors with weak pressure correlation may indicate:
+  - Sources independent of meteorological conditions
+  - Industrial sources with constant emissions
+  - Indoor/sheltered emission sources
+  - Regional background contributions

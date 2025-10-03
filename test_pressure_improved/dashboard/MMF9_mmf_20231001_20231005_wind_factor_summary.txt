@@ -1,0 +1,32 @@
+MMF9 Wind-Factor Analysis Summary
+==================================================
+
+Total matched data points: 1123
+Wind direction range: 2.0 deg - 356.0 deg
+Most frequent wind direction: 207.0 deg
+Wind speed range: 0.0 - 10.3
+Mean wind speed: 3.1
+
+Factor Statistics:
+--------------------
+Factor 1:
+  Mean contribution: 8.730
+  Std deviation: 7.587
+  Max contribution: 45.567
+  Correlation with wind direction: 0.159
+  Correlation with wind speed: 0.403
+
+Factor 2:
+  Mean contribution: 4.108
+  Std deviation: 1.201
+  Max contribution: 9.694
+  Correlation with wind direction: 0.277
+  Correlation with wind speed: 0.372
+
+Factor 3:
+  Mean contribution: 6.738
+  Std deviation: 4.403
+  Max contribution: 23.758
+  Correlation with wind direction: 0.132
+  Correlation with wind speed: -0.249
+

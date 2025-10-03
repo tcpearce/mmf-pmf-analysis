@@ -1608,17 +1608,15 @@ class MMFPMFAnalyzer:
         if unit_str is None:
             return None
         s = str(unit_str).strip().lower()
+        # Handle Greek letters and Unicode characters
         s = s.replace('μ', 'u')
+        # Handle superscript characters (³ → 3, ² → 2)
+        s = s.replace('³', '3')
+        s = s.replace('²', '2')
+        # Remove spaces and parentheses
         s = s.replace(' ', '')
         s = s.replace('(', '').replace(')', '')
-        # Normalize common variants
-        s = s.replace('ug/m3', 'ug/m3')
-        s = s.replace('ug/m3', 'ug/m3')
-        s = s.replace('ug/m3', 'ug/m3')
-        s = s.replace('μg/m3', 'ug/m3')
-        s = s.replace('μg/m3', 'ug/m3')
-        s = s.replace('mg/m3', 'mg/m3')
-        s = s.replace('ng/m3', 'ng/m3')
+        # Normalize common unit variants
         s = s.replace('ugm3', 'ug/m3')
         s = s.replace('mgm3', 'mg/m3')
         s = s.replace('ngm3', 'ng/m3')
@@ -2840,92 +2838,7 @@ class MMFPMFAnalyzer:
         # Create basic PMF plots
         plot_files = []
         
-        # Compute pressure derivative (dP/dt) and correlations vs factors
-        try:
-            # ensure Pressure exists
-            if 'Pressure' in self.df.columns:
-                # prepare series on PMF index
-                p_series = self.df.set_index('datetime')['Pressure'].sort_index()
-                idx = self.concentration_data.index if hasattr(self, 'concentration_data') else p_series.index
-                p_on_idx = p_series.reindex(idx).interpolate(limit_direction='both')
-                time_series = idx.to_series()
-                denom_hours = (time_series.shift(-1) - time_series.shift(1)).dt.total_seconds() / 3600.0
-                dp_central = (p_on_idx.shift(-1) - p_on_idx.shift(1)) / denom_hours
-                # end points fallback to one-sided
-                dt_fwd = (time_series.shift(-1) - time_series).dt.total_seconds() / 3600.0
-                dt_bwd = (time_series - time_series.shift(1)).dt.total_seconds() / 3600.0
-                dp_fwd = (p_on_idx.shift(-1) - p_on_idx) / dt_fwd
-                dp_bwd = (p_on_idx - p_on_idx.shift(1)) / dt_bwd
-                dpdt_1h = dp_central.copy()
-                dpdt_1h = dpdt_1h.fillna(dp_fwd).fillna(dp_bwd)
-                # Optional 3h slope via hourly resample
-                p_hourly = p_series.resample('1H').mean().interpolate(limit_direction='both')
-                slope3 = (p_hourly.shift(-1) - p_hourly.shift(1)) / 2.0
-                slope3 = slope3.reindex(idx).interpolate(limit_direction='both')
-                # Plot time series
-                fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 6), sharex=True)
-                ax1.plot(idx, p_on_idx, color='tab:blue', label='Pressure (hPa)')
-                ax1.set_ylabel('Pressure (hPa)')
-                ax1.grid(True, alpha=0.3)
-                ax1.legend(loc='upper right')
-                ax2.plot(idx, dpdt_1h, color='tab:red', label='dP/dt (hPa/hr, ~1h)')
-                try:
-                    ax2.plot(idx, slope3, color='tab:orange', alpha=0.6, label='3h slope (hPa/hr)')
-                except Exception:
-                    pass
-                ax2.axhline(0, color='k', linewidth=1, alpha=0.5)
-                ax2.set_ylabel('dP/dt (hPa/hr)')
-                ax2.set_xlabel('Time')
-                ax2.grid(True, alpha=0.3)
-                ax2.legend(loc='upper right')
-                plt.tight_layout()
-                dpdt_plot_path = dashboard_dir / f"{self.filename_prefix}_pressure_derivative.png"
-                plt.savefig(dpdt_plot_path, dpi=300, bbox_inches='tight', facecolor='white')
-                plt.close()
-                plot_files.append(dpdt_plot_path)
-                print(f"   [PRESSURE] Saved: pressure_derivative.png")
-                # Compute lagged correlations vs factor contributions (0-3 h)
-                try:
-                    import numpy as np
-                    n_factors = F_profiles.shape[0]
-                    factor_names = [f"Factor_{i+1}" for i in range(n_factors)]
-                    G_df = pd.DataFrame(G_contributions, index=idx, columns=factor_names)
-                    # Determine steps per hour from median dt
-                    med_dt = np.median(np.diff(idx.values).astype('timedelta64[s]').astype(float))
-                    med_dt_h = med_dt / 3600.0 if med_dt and med_dt > 0 else 1.0
-                    step_per_hour = max(1, int(round(1.0 / med_dt_h)))
-                    lags_hours = [0, 1, 2, 3]
-                    corr_mat = np.full((n_factors, len(lags_hours)), np.nan)
-                    for j, lag in enumerate(lags_hours):
-                        shifted = dpdt_1h.shift(-lag * step_per_hour)
-                        for i in range(n_factors):
-                            s = pd.concat([shifted, G_df.iloc[:, i]], axis=1).dropna()
-                            if len(s) > 5:
-                                corr_mat[i, j] = s.iloc[:, 0].corr(s.iloc[:, 1])
-                    # Plot heatmap
-                    fig, ax = plt.subplots(figsize=(2.0 + 1.0*len(lags_hours), 0.8 + 0.5*n_factors))
-                    im = ax.imshow(corr_mat, aspect='auto', cmap='RdBu_r', vmin=-1, vmax=1)
-                    ax.set_xticks(range(len(lags_hours)))
-                    ax.set_xticklabels([f"lag {h}h" for h in lags_hours])
-                    ax.set_yticks(range(n_factors))
-                    ax.set_yticklabels(factor_names)
-                    ax.set_title('Correlation: dP/dt vs Factor contributions')
-                    cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-                    cbar.set_label('Pearson r')
-                    plt.tight_layout()
-                    corr_plot_path = dashboard_dir / f"{self.filename_prefix}_dpdt_factor_corr.png"
-                    plt.savefig(corr_plot_path, dpi=300, bbox_inches='tight', facecolor='white')
-                    plt.close()
-                    plot_files.append(corr_plot_path)
-                    print(f"   [PRESSURE] Saved: dpdt_factor_corr.png")
-                except Exception as e:
-                    print(f"[WARN] Could not compute dP/dt factor correlations: {e}")
-                # Store for HTML context (optional)
-                self._dpdt_series = dpdt_1h
-            else:
-                print("[WARN] Pressure column not found; skipping dP/dt plots")
-        except Exception as e:
-            print(f"[WARN] Failed to generate dP/dt analysis: {e}")
+        # Compute pressure derivative analysis has been moved to the pressure analysis section
         
         # Compute and save closure metrics for mass balance analysis
         try:
@@ -3032,6 +2945,7 @@ class MMFPMFAnalyzer:
         
         # New: Relative (composition) profiles per factor for scale-invariant view
         try:
+            import numpy as np  # Ensure numpy is available
             n_factors = F_profiles.shape[0]
             if n_factors <= 4:
                 nrows, ncols = 2, 2
@@ -3138,6 +3052,7 @@ class MMFPMFAnalyzer:
         
         try:
             # Plot 3: Species Composition (Stacked Bar)
+            import numpy as np  # Ensure numpy is available
             fig, ax = plt.subplots(figsize=(12, 8))
             
             bottom = np.zeros(len(self.species_names))
@@ -6836,6 +6751,9 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         plot_files.append(plot_path)
         print(f"   [OK] Saved: pressure_analysis.png")
         
+        # Add pressure derivative analysis plots
+        self._create_pressure_derivative_plots(dashboard_dir, plot_files, G_contributions)
+        
         # Create additional summary statistics
         self._create_pressure_summary_stats(dashboard_dir, pressure_df, G_pressure, pressure_columns, correlations, p_values)
     
@@ -6918,6 +6836,438 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
             f.write("  - Regional background contributions\n")
         
         print(f"   [FILE] Pressure summary statistics: {summary_path}")
+    
+    def _create_pressure_derivative_plots(self, dashboard_dir, plot_files, G_contributions):
+        """
+        Create pressure derivative (dP/dt) analysis plots showing barometric pumping effects.
+        """
+        try:
+            import numpy as np
+            import matplotlib.pyplot as plt
+            
+            # ensure Pressure exists
+            if 'Pressure' not in self.df.columns:
+                print("[WARN] Pressure column not found; skipping dP/dt plots")
+                return
+            
+            # Get the datetime index from the concentration data (which matches PMF analysis)
+            if not hasattr(self, 'concentration_data'):
+                print("[WARN] No concentration data available; skipping dP/dt plots")
+                return
+            
+            # SAFE APPROACH: Create independent pressure analysis without affecting PMF data
+            # Work with a completely separate copy to avoid affecting PMF analysis
+            pressure_df = self.df.copy()
+            pressure_df['datetime'] = pd.to_datetime(pressure_df['datetime'])
+            
+            # Create pressure time series from current filtered data (original sparse measurements)
+            pressure_indexed = pressure_df.set_index('datetime')['Pressure'].sort_index()
+            
+            # FIXED: Use actual concentration data timestamps instead of sparse regular grid
+            # This preserves pressure variation by matching actual measurement times
+            concentration_rows = self.df[self.df.index.isin(self.concentration_data.index)]
+            # Sort by datetime to ensure proper chronological order
+            concentration_rows = concentration_rows.sort_values('datetime')
+            # Create properly formatted datetime index 
+            idx = pd.to_datetime(concentration_rows['datetime'].values).sort_values()
+            # Remove duplicates and ensure unique timestamps
+            idx = pd.Index(idx).drop_duplicates().sort_values()
+            
+            # Debug datetime handling
+            print(f"   [DEBUG] Created datetime index: {len(idx)} timestamps from {idx.min()} to {idx.max()}")
+            
+            print(f"   [DEBUG] Pressure analysis: {pressure_indexed.notna().sum()} raw points")
+            print(f"   [DEBUG] Using {len(idx)} concentration data timestamps for pressure alignment")
+            
+            # FIXED APPROACH: Calculate derivatives on original sparse measurements FIRST
+            # Get only the non-NaN pressure data points (the actual 15-minute measurements)
+            p_valid = pressure_indexed.dropna()  # Original sparse measurements
+            
+            if len(p_valid) < 3:
+                print(f"   [WARN] Insufficient pressure data points ({len(p_valid)}) for derivative calculation")
+                return
+            
+            # Apply zero-phase low-pass filtering to remove noise before derivative calculation
+            try:
+                from scipy import signal
+                
+                # Design Butterworth low-pass filter (cutoff = 1/(6 hours) for smoother signal)
+                # 15-min data -> Nyquist = 1/(30 min) = 48 cycles/day
+                # Cutoff at 4 cycles/day (6-hour period) for smoother weather patterns
+                fs = 1.0 / (15 * 60)  # Sampling frequency in Hz (15-minute intervals)
+                cutoff = 1.0 / (6 * 3600)  # Cutoff frequency: 1/(6 hours) in Hz
+                nyquist = fs / 2
+                normalized_cutoff = cutoff / nyquist
+                
+                # Create 4th order Butterworth filter
+                b, a = signal.butter(4, normalized_cutoff, btype='low', analog=False)
+                
+                # Apply zero-phase filtering (forward + backward pass, no phase lag)
+                p_filtered = signal.filtfilt(b, a, p_valid.values)
+                p_valid_filtered = pd.Series(p_filtered, index=p_valid.index)
+                
+                print(f"   [DEBUG] Applied zero-phase low-pass filter (cutoff: 6-hour period)")
+                print(f"   [DEBUG] Pressure range after filtering: {p_valid_filtered.min():.2f} - {p_valid_filtered.max():.2f} hPa")
+                
+            except ImportError:
+                print(f"   [WARN] scipy not available - using raw pressure data (will be noisy)")
+                p_valid_filtered = p_valid
+            except Exception as e:
+                print(f"   [WARN] Filtering failed: {e} - using raw pressure data")
+                p_valid_filtered = p_valid
+            
+            # ENHANCED: Calculate 6-hour window derivatives for ALL PMF timestamps to maximize data usage
+            # This approach uses all available pressure measurements around each PMF timestamp
+            
+            window_hours = 6.0
+            window_timedelta = pd.Timedelta(hours=window_hours)
+            
+            print(f"   [DEBUG] Calculating derivatives using {window_hours}-hour window for ALL PMF timestamps")
+            print(f"   [DEBUG] This maximizes use of all {len(p_valid_filtered)} available pressure measurements")
+            
+            # Create derivative series for ALL concentration timestamps (not just pressure timestamps)
+            dpdt_1h = pd.Series(index=idx, dtype=float)
+            derivatives_calculated = 0
+            insufficient_data_count = 0
+            
+            # Calculate derivatives at each PMF analysis timestamp
+            for timestamp in idx:
+                # Find all available pressure values within ±3 hours of current timestamp
+                start_time = timestamp - window_timedelta / 2
+                end_time = timestamp + window_timedelta / 2
+                
+                # Get ALL pressure data within the window (using original unfiltered data for maximum coverage)
+                window_data_raw = pressure_indexed[(pressure_indexed.index >= start_time) & 
+                                                  (pressure_indexed.index <= end_time) &
+                                                  (pressure_indexed.notna())]
+                
+                # Also get filtered data in the window if available
+                window_data_filtered = p_valid_filtered[(p_valid_filtered.index >= start_time) & 
+                                                       (p_valid_filtered.index <= end_time)]
+                
+                # Use filtered data if we have enough, otherwise fall back to raw data
+                if len(window_data_filtered) >= 3:
+                    window_data = window_data_filtered
+                    data_source = "filtered"
+                elif len(window_data_raw) >= 3:
+                    window_data = window_data_raw
+                    data_source = "raw"
+                else:
+                    # Try expanding the window if we don't have enough data
+                    extended_window = window_timedelta * 1.5  # Extend to 9 hours
+                    start_extended = timestamp - extended_window / 2
+                    end_extended = timestamp + extended_window / 2
+                    
+                    window_data_extended = pressure_indexed[(pressure_indexed.index >= start_extended) & 
+                                                           (pressure_indexed.index <= end_extended) &
+                                                           (pressure_indexed.notna())]
+                    
+                    if len(window_data_extended) >= 3:
+                        window_data = window_data_extended
+                        data_source = "extended-9h"
+                    else:
+                        insufficient_data_count += 1
+                        continue
+                
+                # Calculate weighted linear regression slope over the window
+                # Weight points by their temporal distance from the center timestamp
+                times_sec = np.array([(t - timestamp).total_seconds() for t in window_data.index])
+                pressures = window_data.values
+                
+                # Apply distance-based weighting (closer points get higher weight)
+                max_distance = np.max(np.abs(times_sec)) if len(times_sec) > 1 else 1
+                if max_distance > 0:
+                    weights = 1.0 - (np.abs(times_sec) / max_distance) ** 0.5  # Sqrt weighting
+                    weights = np.maximum(weights, 0.1)  # Minimum weight of 0.1
+                else:
+                    weights = np.ones(len(times_sec))
+                
+                # Weighted linear regression
+                if len(times_sec) >= 3:  # Need at least 3 points
+                    # Compute weighted means
+                    w_sum = np.sum(weights)
+                    mean_time = np.sum(weights * times_sec) / w_sum
+                    mean_pressure = np.sum(weights * pressures) / w_sum
+                    
+                    # Compute weighted slope
+                    numerator = np.sum(weights * (times_sec - mean_time) * (pressures - mean_pressure))
+                    denominator = np.sum(weights * (times_sec - mean_time) ** 2)
+                    
+                    if denominator > 0:
+                        slope_per_second = numerator / denominator
+                        slope_per_hour = slope_per_second * 3600.0  # Convert to hPa/hr
+                        dpdt_1h.loc[timestamp] = slope_per_hour
+                        derivatives_calculated += 1
+            
+            print(f"   [DEBUG] Calculated {derivatives_calculated} derivatives for {len(idx)} PMF timestamps")
+            print(f"   [DEBUG] Insufficient data for {insufficient_data_count} timestamps")
+            
+            # Remove any remaining NaN values
+            dpdt_valid_count = dpdt_1h.notna().sum()
+            if dpdt_valid_count > 0:
+                print(f"   [DEBUG] Final dP/dt range: {dpdt_1h.min():.3f} to {dpdt_1h.max():.3f} hPa/hr")
+            else:
+                print(f"   [DEBUG] No valid derivatives calculated")
+            
+            # Calculate smoother hourly derivative for comparison
+            try:
+                if len(p_valid_filtered) >= 3:
+                    # Resample filtered pressure to hourly, then calculate derivatives
+                    p_hourly = p_valid_filtered.resample('1H').mean().interpolate(limit_direction='both')
+                    if len(p_hourly) >= 2:
+                        # Simple hourly derivative
+                        slope3_hourly = p_hourly.diff() / 1.0  # 1 hour intervals
+                        slope3 = slope3_hourly.reindex(idx).interpolate(method='time', limit_direction='both')
+                        if slope3.isna().any():
+                            slope3 = slope3.ffill().bfill()
+                    else:
+                        slope3 = None
+                else:
+                    slope3 = None
+            except Exception:
+                slope3 = None
+            
+            # Create interpolated pressure for visualization (both raw and filtered)
+            p_on_idx_raw = pressure_indexed.reindex(idx).interpolate(method='time', limit_direction='both')
+            
+            if len(p_valid_filtered) > 0:
+                # Create filtered pressure series for interpolation
+                pressure_indexed_filtered = pressure_indexed.copy()
+                pressure_indexed_filtered.loc[p_valid_filtered.index] = p_valid_filtered
+                p_on_idx_filtered = pressure_indexed_filtered.reindex(idx).interpolate(method='time', limit_direction='both')
+                p_on_idx = p_on_idx_filtered  # Use filtered for derivative calculations
+                print(f"   [DEBUG] Prepared both raw and filtered pressure data for visualization")
+            else:
+                # Fallback to original data if filtering failed
+                p_on_idx_filtered = None
+                p_on_idx = p_on_idx_raw
+            
+            # Debug: Check data ranges before plotting
+            p_valid_count = p_on_idx.notna().sum()
+            dpdt_valid_count = dpdt_1h.notna().sum() if dpdt_1h is not None else 0
+            if p_valid_count > 0:
+                p_min, p_max = p_on_idx.min(), p_on_idx.max()
+            else:
+                p_min, p_max = float('nan'), float('nan')
+            if dpdt_valid_count > 0:
+                dpdt_min, dpdt_max = dpdt_1h.min(), dpdt_1h.max()
+            else:
+                dpdt_min, dpdt_max = float('nan'), float('nan')
+                
+            print(f"   [DEBUG] Pressure data: {p_valid_count}/{len(p_on_idx)} valid points, range: {p_min:.2f} - {p_max:.2f} hPa")
+            print(f"   [DEBUG] dP/dt data: {dpdt_valid_count}/{len(dpdt_1h) if dpdt_1h is not None else 0} valid points, range: {dpdt_min:.4f} - {dpdt_max:.4f} hPa/hr")
+            
+            # Plot time series with proper axis scaling (3 subplots)
+            # Note: ax3 should NOT share x-axis as it plots pressure derivatives vs factors (not time-based)
+            fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 9), sharex=False)
+            # Share x-axis only between ax1 and ax2 (both are time series)
+            ax2.sharex(ax1)
+            
+            # Configure datetime formatting for matplotlib
+            import matplotlib.dates as mdates
+            # Set major and minor ticks for datetime axis
+            ax1.xaxis.set_major_locator(mdates.HourLocator(interval=6))
+            ax1.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d %H:%M'))
+            ax1.xaxis.set_minor_locator(mdates.HourLocator(interval=1))
+            
+            # Plot 1: Pressure time series (both raw and filtered if available) - REVERT TO WORKING VERSION
+            if p_on_idx_filtered is not None:
+                # Plot raw data first (background)
+                ax1.plot(idx, p_on_idx_raw, color='lightgray', alpha=0.6, label=f'Raw Pressure (hPa)', linewidth=1, zorder=1)
+                # Plot filtered data on top (foreground)
+                ax1.plot(idx, p_on_idx_filtered, color='tab:blue', label=f'Filtered Pressure (hPa): {p_min:.1f}-{p_max:.1f}', linewidth=2, zorder=2)
+            else:
+                # Only raw data available
+                ax1.plot(idx, p_on_idx, color='tab:blue', label=f'Pressure (hPa): {p_min:.1f}-{p_max:.1f}', linewidth=1.5)
+            
+            # Add red dots at y=0 for missing pressure data points
+            missing_mask = p_on_idx.isna()
+            if missing_mask.sum() > 0:
+                missing_times = idx[missing_mask]
+                ax1.scatter(missing_times, [0] * len(missing_times), 
+                           color='red', s=2, alpha=0.7, 
+                           label=f'Missing data ({missing_mask.sum()} points)', zorder=5)
+            
+            ax1.set_ylabel('Pressure (hPa)')
+            if p_on_idx_filtered is not None:
+                ax1.set_title(f'Pressure Time Series: Raw vs 6-Hour Low-Pass Filtered (Range: {p_min:.2f} - {p_max:.2f} hPa)')
+            else:
+                ax1.set_title(f'Pressure Time Series (Range: {p_min:.2f} - {p_max:.2f} hPa)')
+            ax1.grid(True, alpha=0.3)
+            ax1.legend(loc='upper right')
+            
+            # Plot 2: Pressure derivative - REVERT TO WORKING VERSION
+            if dpdt_valid_count > 0:
+                ax2.plot(idx, dpdt_1h, color='tab:red', label=f'dP/dt (hPa/hr): {dpdt_min:.3f}-{dpdt_max:.3f}', linewidth=1.5)
+            else:
+                ax2.plot(idx, dpdt_1h, color='tab:red', label='dP/dt (hPa/hr): No data', linewidth=1.5)
+            
+            # Add red dots at y=0 for missing dP/dt data points
+            if dpdt_1h is not None:
+                dpdt_missing_mask = dpdt_1h.isna()
+                if dpdt_missing_mask.sum() > 0:
+                    dpdt_missing_times = idx[dpdt_missing_mask]
+                    ax2.scatter(dpdt_missing_times, [0] * len(dpdt_missing_times), 
+                               color='red', s=2, alpha=0.7, 
+                               label=f'Missing dP/dt ({dpdt_missing_mask.sum()} points)', zorder=5)
+                
+            # Plot hourly slope if available
+            if slope3 is not None and slope3.notna().sum() > 0:
+                ax2.plot(idx, slope3, color='tab:orange', alpha=0.6, label='1h slope (hPa/hr)', linewidth=1)
+                
+            ax2.axhline(0, color='k', linewidth=1, alpha=0.5)
+            ax2.set_ylabel('dP/dt (hPa/hr)')
+            ax2.set_xlabel('Time')
+            ax2.set_title(f'Pressure Derivative - 6-Hour Window (Range: {dpdt_min:.4f} - {dpdt_max:.4f} hPa/hr)')
+            ax2.grid(True, alpha=0.3)
+            ax2.legend(loc='upper right')
+            
+            # Plot 3: Factor contributions vs pressure derivatives (scatter plot)
+            n_factors = G_contributions.shape[1]
+            if dpdt_1h is not None and dpdt_valid_count > 10:
+                # Get consistent colors for factors
+                if hasattr(self, 'color_manager'):
+                    factor_colors = self.color_manager._get_factor_colors(n_factors)
+                else:
+                    # Fallback colors if color manager not available
+                    factor_colors = plt.cm.Set1(np.linspace(0, 1, n_factors))
+                
+                # Plot each factor with its own color
+                for f in range(n_factors):
+                    factor_contrib = G_contributions[:, f]
+                    
+                    # Create scatter plot with factor-colored points
+                    # Extract actual pressure derivative VALUES (not datetime index)
+                    dpdt_values = dpdt_1h.values  # Use .values to get data array, not index
+                    valid_data_mask = ~(np.isnan(dpdt_values) | np.isnan(factor_contrib))
+                    if valid_data_mask.sum() > 0:
+                        ax3.scatter(dpdt_values[valid_data_mask], factor_contrib[valid_data_mask], 
+                                  c=[factor_colors[f]], alpha=0.6, s=20,
+                                  label=f'Factor {f+1}', edgecolors='black', linewidth=0.5)
+                
+                ax3.set_xlabel('Pressure Derivative (hPa/hr)')
+                ax3.set_ylabel('Factor Contribution')
+                ax3.set_title('Factor Contributions vs 6-Hour Pressure Derivative (Barometric Pumping Analysis)')
+                ax3.grid(True, alpha=0.3)
+                ax3.legend(loc='upper right', ncol=min(n_factors, 3))  # Max 3 columns for legend
+                
+                # Add zero reference lines
+                ax3.axhline(0, color='k', linewidth=0.5, alpha=0.3)
+                ax3.axvline(0, color='k', linewidth=0.5, alpha=0.3)
+                
+            else:
+                ax3.text(0.5, 0.5, 'Insufficient pressure derivative data\nfor factor correlation analysis', 
+                        transform=ax3.transAxes, ha='center', va='center',
+                        bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.5))
+                ax3.set_xlabel('Pressure Derivative (hPa/hr)')
+                ax3.set_ylabel('Factor Contribution')
+                ax3.set_title('Factor Contributions vs Pressure Derivative')
+            
+            # Ensure proper y-axis limits to show the data
+            if p_valid_count > 0 and not (pd.isna(p_min) or pd.isna(p_max)) and p_max != p_min:
+                p_range = p_max - p_min
+                ax1.set_ylim(p_min - 0.05*p_range, p_max + 0.05*p_range)
+            
+            if (dpdt_valid_count > 0 and dpdt_1h is not None and 
+                not (pd.isna(dpdt_min) or pd.isna(dpdt_max)) and dpdt_max != dpdt_min):
+                dpdt_range = dpdt_max - dpdt_min
+                ax2.set_ylim(dpdt_min - 0.05*dpdt_range, dpdt_max + 0.05*dpdt_range)
+            
+            # Set appropriate limits for factor contributions plot
+            if dpdt_1h is not None and dpdt_valid_count > 10:
+                # Set reasonable limits for factor contributions based on data
+                factor_min = np.min(G_contributions)
+                factor_max = np.max(G_contributions)
+                if factor_max != factor_min:
+                    factor_range = factor_max - factor_min
+                    ax3.set_ylim(factor_min - 0.05*factor_range, factor_max + 0.05*factor_range)
+                
+            plt.tight_layout()
+            dpdt_plot_path = dashboard_dir / f"{self.filename_prefix}_pressure_derivative.png"
+            plt.savefig(dpdt_plot_path, dpi=300, bbox_inches='tight', facecolor='white')
+            plt.close()
+            plot_files.append(dpdt_plot_path)
+            print(f"   [PRESSURE] Saved: pressure_derivative.png")
+            
+            # Compute lagged correlations vs factor contributions (0-3 h)
+            try:
+                n_factors = G_contributions.shape[1]
+                factor_names = [f"Factor_{i+1}" for i in range(n_factors)]
+                G_df = pd.DataFrame(G_contributions, index=idx, columns=factor_names)
+                
+                # Only proceed if we have valid pressure derivative data
+                if dpdt_1h is not None and dpdt_valid_count > 10:  # Need at least 10 valid points
+                    # Determine steps per hour from median dt
+                    med_dt = np.median(np.diff(idx.values).astype('timedelta64[s]').astype(float))
+                    med_dt_h = med_dt / 3600.0 if med_dt and med_dt > 0 else 1.0
+                    step_per_hour = max(1, int(round(1.0 / med_dt_h)))
+                    lags_hours = [0, 1, 2, 3]
+                    corr_mat = np.full((n_factors, len(lags_hours)), np.nan)
+                    
+                    for j, lag in enumerate(lags_hours):
+                        shifted = dpdt_1h.shift(-lag * step_per_hour)
+                        for i in range(n_factors):
+                            # Combine and drop NaN values (important for sparse pressure data)
+                            combined = pd.DataFrame({
+                                'dpdt': shifted,
+                                'factor': G_df.iloc[:, i]
+                            }).dropna()
+                            
+                            if len(combined) > 5:  # Need sufficient overlap for reliable correlation
+                                corr_mat[i, j] = combined['dpdt'].corr(combined['factor'])
+                else:
+                    print(f"   [WARN] Insufficient pressure derivative data ({dpdt_valid_count} points) for correlation analysis")
+                    n_factors = G_contributions.shape[1]
+                    lags_hours = [0, 1, 2, 3]
+                    corr_mat = np.full((n_factors, len(lags_hours)), np.nan)
+                    
+                # Plot heatmap with adaptive color scale
+                max_abs_corr = np.nanmax(np.abs(corr_mat))
+                if max_abs_corr < 0.2:  # If all correlations are small, use a more sensitive scale
+                    vmin, vmax = -0.2, 0.2
+                    title_suffix = " (enhanced scale: ±0.2)"
+                else:
+                    vmin, vmax = -1, 1
+                    title_suffix = ""
+                
+                fig, ax = plt.subplots(figsize=(2.0 + 1.0*len(lags_hours), 0.8 + 0.5*n_factors))
+                im = ax.imshow(corr_mat, aspect='auto', cmap='RdBu_r', vmin=vmin, vmax=vmax)
+                ax.set_xticks(range(len(lags_hours)))
+                ax.set_xticklabels([f"lag {h}h" for h in lags_hours])
+                ax.set_yticks(range(n_factors))
+                ax.set_yticklabels(factor_names)
+                ax.set_title(f'Correlation: dP/dt vs Factor contributions{title_suffix}')
+                cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+                cbar.set_label('Pearson r')
+                
+                # Add correlation values as text for better readability
+                for i in range(n_factors):
+                    for j in range(len(lags_hours)):
+                        if not np.isnan(corr_mat[i, j]):
+                            # Use white text for strong correlations, black for weak ones
+                            text_color = 'white' if abs(corr_mat[i, j]) > 0.5 * max(abs(vmin), abs(vmax)) else 'black'
+                            ax.text(j, i, f'{corr_mat[i, j]:.3f}', ha='center', va='center', 
+                                    color=text_color, fontsize=9, weight='bold')
+                
+                plt.tight_layout()
+                corr_plot_path = dashboard_dir / f"{self.filename_prefix}_dpdt_factor_corr.png"
+                plt.savefig(corr_plot_path, dpi=300, bbox_inches='tight', facecolor='white')
+                plt.close()
+                plot_files.append(corr_plot_path)
+                print(f"   [PRESSURE] Saved: dpdt_factor_corr.png")
+                
+            except Exception as e:
+                print(f"[WARN] Could not compute dP/dt factor correlations: {e}")
+                
+            # Store for HTML context (optional)
+            self._dpdt_series = dpdt_1h
+            
+        except Exception as e:
+            import traceback
+            print(f"[WARN] Failed to generate dP/dt analysis: {e}")
+            print(f"[DEBUG] Error details: {traceback.format_exc()}")
+            # Continue without pressure derivative plots
+            pass
     
     def convert_dashboard_to_pdf(self, dashboard_dir, station=None):
         """Convert HTML dashboard to PDF using multiple fallback methods."""

@@ -1,0 +1,11 @@
+SPECIES REGULARIZATION DIAGNOSTIC REPORT
+==================================================
+
+CONVERGENCE ANALYSIS
+--------------------
+Total Training Bursts: 8
+Total Objective Reduction: 28616.98
+Average Relative Change: 0.971461
+Final Relative Change: 0.960868
+Converged (< 1e-4): No
+

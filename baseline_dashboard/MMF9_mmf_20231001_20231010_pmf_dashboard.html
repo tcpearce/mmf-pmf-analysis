@@ -1,0 +1,204 @@
+
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>MMF9 - Galingale View PMF Source Apportionment Dashboard</title>
+            <style>
+                body { font-family: Arial, sans-serif; margin: 20px; }
+                .header { text-align: center; margin-bottom: 30px; }
+                .plot-container { margin: 20px 0; text-align: center; }
+                .plot-container img { max-width: 100%; height: auto; border: 1px solid #ddd; }
+                .summary { background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0; }
+                .config-section { background-color: #e8f4fd; padding: 15px; border-radius: 5px; margin: 20px 0; }
+                .epa-section { background-color: #fff2e6; padding: 15px; border-radius: 5px; margin: 20px 0; }
+                .snr-section { background-color: #f0f8f0; padding: 15px; border-radius: 5px; margin: 20px 0; }
+                .cli-section { background-color: #f9f9f9; padding: 15px; border-radius: 5px; margin: 20px 0; font-family: monospace; }
+                .category-strong { color: #2ecc71; font-weight: bold; }
+                .category-weak { color: #f39c12; font-weight: bold; }
+                .category-bad { color: #e74c3c; font-weight: bold; }
+                table { border-collapse: collapse; margin: 10px 0; }
+                th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                th { background-color: #f2f2f2; }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h1>MMF9 - Galingale View PMF Source Apportionment Analysis</h1>
+                <p><strong>Analysis Date:</strong> 2025-09-28 23:25</p>
+                <p><strong>Data Period:</strong> 2023-10-01 to 2023-10-10</p>
+                <p><strong>Factors Resolved:</strong> 3</p>
+                <p><strong>Models Run:</strong> 3</p>
+            </div>
+            
+            <div class="config-section">
+                <h2>[CONFIG] Run Configuration</h2>
+                <ul>
+                    <li><strong>Uncertainty Mode:</strong> epa 
+                        (EPA PMF 5.0 formulas)</li>
+                    <li><strong>ESAT Algorithm:</strong> LS-NMF (Standard PMF, nonnegative)</li>
+                    <li><strong>Initialization:</strong> Column Mean</li>
+                    <li><strong>Matrix Updates:</strong> Standard training</li>
+                    <li><strong>Random Seed:</strong> 42</li>
+                    <li><strong>Records Analyzed:</strong> 2,520</li>
+                    <li><strong>Original Species:</strong> 14 
+                        </li>
+                    <li><strong>Final Species:</strong> 14</li>
+                </ul>
+            </div>
+        
+            <div class="epa-section">
+                <h2>[EMOJI] EPA Uncertainty Policy (PMF 5.0)</h2>
+                <ul>
+                    <li><strong>Above MDL:</strong> U = √((EF × conc)2 + (0.5 × MDL)2)</li>
+                    <li><strong>BDL Cases:</strong> V = MDL/2, U = Five Sixth Mdl</li>
+                    <li><strong>Missing Cases:</strong> V = species median (fallback MDL), U = 4 × median (fallback 4 × MDL)</li>
+                    <li><strong>EF/MDL Source:</strong> Built-in database</li>
+                    <li><strong>Aggregation Scaling:</strong> Applied as 1/√n when counts are available</li>
+                </ul>
+            </div>
+            
+            <div class="epa-section">
+                <h2>[CLOSURE] Mass Closure / Fit Divergence Analysis</h2>
+                <p><strong>Purpose:</strong> Quantify how well the PMF model reconstructs measured concentrations (closure) and identify species where regularization affects fit quality.</p>
+            <h3>Group-Level Closure:</h3><ul><li><strong>Gases:</strong> 96.6% (6 species)</li><li><strong>VOCs:</strong> 108.5% (3 species)</li><li><strong>PM:</strong> 96.3% (5 species)</li></ul>
+                <h3>Interpretation Guide:</h3>
+                <ul>
+                    <li><strong>Closure %:</strong> (Reconstructed Sum / Measured Sum) × 100. Values near 100% indicate good fit.</li>
+                    <li><strong>Weighted Closure %:</strong> Same calculation but weighted by 1/uncertainty². More robust to outliers.</li>
+                    <li><strong>Red bars:</strong> Regularized species (expected to show closure reduction as λ increases).</li>
+                    <li><strong>Q Share %:</strong> Fraction of total model Q contributed by each species (indicates fit difficulty).</li>
+                </ul>
+                <p><strong>Files:</strong> See <code>MMF9_mmf_20231001_20231010_closure_summary.csv</code> for detailed per-species metrics.</p>
+            </div>
+            
+            <div class="summary">
+                <h2>Model Performance</h2>
+                <ul>
+                    <li><strong>Q(true):</strong> {self.best_model.Qtrue:.2f}</li>
+                    <li><strong>Q(robust):</strong> {self.best_model.Qrobust:.2f}</li>
+        
+                    <li><strong>DoF:</strong> 27,678</li>
+                    <li><strong>Q/DoF Ratio:</strong> 1.130 (Excellent per EPA guidelines)</li>
+                    
+                </ul>
+            </div>
+        
+            <div class="plot-container">
+                <h3>Mmf9 Mmf 20231001 20231010 Factor Profiles</h3>
+                <img src="dashboard/MMF9_mmf_20231001_20231010_factor_profiles.png" alt="Mmf9 Mmf 20231001 20231010 Factor Profiles">
+            </div>
+            
+            <div class="plot-container">
+                <h3>Mmf9 Mmf 20231001 20231010 Factor Profiles Relative</h3>
+                <img src="dashboard/MMF9_mmf_20231001_20231010_factor_profiles_relative.png" alt="Mmf9 Mmf 20231001 20231010 Factor Profiles Relative">
+            </div>
+            
+            <div class="plot-container">
+                <h3>Mmf9 Mmf 20231001 20231010 Factor Contributions</h3>
+                <img src="dashboard/MMF9_mmf_20231001_20231010_factor_contributions.png" alt="Mmf9 Mmf 20231001 20231010 Factor Contributions">
+            </div>
+            
+            <div class="plot-container">
+                <h3>Mmf9 Mmf 20231001 20231010 Species Composition</h3>
+                <img src="dashboard/MMF9_mmf_20231001_20231010_species_composition.png" alt="Mmf9 Mmf 20231001 20231010 Species Composition">
+            </div>
+            
+            <div class="plot-container">
+                <h3>Mmf9 Mmf 20231001 20231010 Model Quality</h3>
+                <img src="dashboard/MMF9_mmf_20231001_20231010_model_quality.png" alt="Mmf9 Mmf 20231001 20231010 Model Quality">
+            </div>
+            
+            <div class="plot-container">
+                <h3>Mmf9 Mmf 20231001 20231010 Residual Analysis</h3>
+                <img src="dashboard/MMF9_mmf_20231001_20231010_residual_analysis.png" alt="Mmf9 Mmf 20231001 20231010 Residual Analysis">
+            </div>
+            
+            <div class="plot-container">
+                <h3>Mmf9 Mmf 20231001 20231010 Correlation Analysis</h3>
+                <img src="dashboard/MMF9_mmf_20231001_20231010_correlation_analysis.png" alt="Mmf9 Mmf 20231001 20231010 Correlation Analysis">
+            </div>
+            
+            <div class="plot-container">
+                <h3>Mmf9 Mmf 20231001 20231010 Source Contribution Analysis</h3>
+                <img src="dashboard/MMF9_mmf_20231001_20231010_source_contribution_analysis.png" alt="Mmf9 Mmf 20231001 20231010 Source Contribution Analysis">
+            </div>
+            
+            <div class="plot-container">
+                <h3>Mmf9 Mmf 20231001 20231010 Temporal Analysis</h3>
+                <img src="dashboard/MMF9_mmf_20231001_20231010_temporal_analysis.png" alt="Mmf9 Mmf 20231001 20231010 Temporal Analysis">
+            </div>
+            
+            <div class="plot-container">
+                <h3>Mmf9 Mmf 20231001 20231010 Diagnostic Scatters</h3>
+                <img src="dashboard/MMF9_mmf_20231001_20231010_diagnostic_scatters.png" alt="Mmf9 Mmf 20231001 20231010 Diagnostic Scatters">
+            </div>
+            
+            <div class="plot-container">
+                <h3>Mmf9 Mmf 20231001 20231010 Wind Analysis</h3>
+                <img src="dashboard/MMF9_mmf_20231001_20231010_wind_analysis.png" alt="Mmf9 Mmf 20231001 20231010 Wind Analysis">
+            </div>
+            
+            <div class="plot-container">
+                <h3>Mmf9 Mmf 20231001 20231010 Temperature Analysis</h3>
+                <img src="dashboard/MMF9_mmf_20231001_20231010_temperature_analysis.png" alt="Mmf9 Mmf 20231001 20231010 Temperature Analysis">
+            </div>
+            
+            <div class="plot-container">
+                <h3>Mmf9 Mmf 20231001 20231010 Pressure Analysis</h3>
+                <img src="dashboard/MMF9_mmf_20231001_20231010_pressure_analysis.png" alt="Mmf9 Mmf 20231001 20231010 Pressure Analysis">
+            </div>
+            
+            <div class="plot-container">
+                <h3>Mmf9 Mmf 20231001 20231010 Sankey Diagram</h3>
+                <img src="dashboard/MMF9_mmf_20231001_20231010_sankey_diagram.png" alt="Mmf9 Mmf 20231001 20231010 Sankey Diagram">
+            </div>
+            
+            <div class="cli-section">
+                <h2>[INFO] CLI Flags Used (Reproducibility Record)</h2>
+                <p><strong>Command to reproduce this analysis:</strong></p>
+                <pre style="background-color: #f8f8f8; padding: 10px; border-radius: 3px; overflow-x: auto;">
+        python pmf_source_app.py \
+    --station MMF9 \
+    --start-date 2023-10-01 \
+    --end-date 2023-10-10 \
+    --output-dir "baseline_dashboard" \
+    --uncertainty-mode epa \
+    --write-diagnostics
+                </pre>
+                
+                <h3>Parameter Details:</h3>
+                <table>
+                    <tr><th>Parameter</th><th>Value</th><th>Description</th></tr>
+        
+                    <tr><td>--uncertainty-mode</td><td>epa</td><td>Uncertainty calculation method</td></tr>
+            
+                    <tr><td>--method</td><td>ls-nmf</td><td>ESAT NMF algorithm (ls-nmf or ws-nmf)</td></tr>
+            
+                    <tr><td>--init-method</td><td>column_mean</td><td>Matrix initialization method</td></tr>
+            
+                    <tr><td>--init-norm</td><td>True</td><td>Normalize data before kmeans initialization</td></tr>
+            
+                    <tr><td>--hold-h</td><td>False</td><td>Hold H (profile) matrix constant during training</td></tr>
+            
+                    <tr><td>--delay-h</td><td>-1</td><td>Hold H matrix for N iterations (-1 = disabled)</td></tr>
+            
+                    <tr><td>--snr-enable</td><td>False</td><td>EPA S/N-based feature categorization</td></tr>
+            
+                    <tr><td>--robust-fit</td><td>False</td><td>Use robust loss during SA training (fallback only)</td></tr>
+            
+                    <tr><td>--robust-alpha</td><td>4.0</td><td>Robust cutoff alpha for scaled residuals</td></tr>
+            
+                    <tr><td>--snr-weak-threshold</td><td>2.0</td><td>S/N threshold for weak species</td></tr>
+            
+                    <tr><td>--snr-bad-threshold</td><td>0.2</td><td>S/N threshold for bad species</td></tr>
+            
+                    <tr><td>--exclude-bad</td><td>True</td><td>Exclude bad species from analysis</td></tr>
+            
+                    <tr><td>--seed</td><td>42</td><td>Random seed for reproducibility</td></tr>
+            
+                    <tr><td>--write-diagnostics</td><td>True</td><td>Write diagnostic CSV files</td></tr>
+            
+                </table>
+                <p><small><em>Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</em></small></p>
+            </div>
+        </body></html>

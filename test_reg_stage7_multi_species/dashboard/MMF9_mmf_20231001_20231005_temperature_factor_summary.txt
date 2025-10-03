@@ -1,0 +1,60 @@
+MMF9 Temperature-Factor Analysis Summary
+==================================================
+
+Total matched data points: 1120
+Temperature columns analyzed: TEMP
+
+TEMP Statistics:
+  Range: 10.4 - 20.6 0C
+  Mean: 15.2 0C
+  Median: 15.2 0C
+  Std deviation: 2.7 0C
+
+Factor-Temperature Correlations:
+------------------------------
+Factor 1:
+  Mean contribution: 4.762
+  Std deviation: 5.303
+  Correlation with temperature: -0.182
+  P-value: 7.948e-10
+  Interpretation: very weak negative correlation, highly significant (***)
+
+Factor 2:
+  Mean contribution: 5.116
+  Std deviation: 5.983
+  Correlation with temperature: 0.246
+  P-value: 6.076e-17
+  Interpretation: very weak positive correlation, highly significant (***)
+
+Factor 3:
+  Mean contribution: 3.791
+  Std deviation: 5.891
+  Correlation with temperature: -0.206
+  P-value: 3.470e-12
+  Interpretation: very weak negative correlation, highly significant (***)
+
+Factor 4:
+  Mean contribution: 6.160
+  Std deviation: 4.156
+  Correlation with temperature: -0.122
+  P-value: 4.545e-05
+  Interpretation: very weak negative correlation, highly significant (***)
+
+Environmental Interpretation Notes:
+-----------------------------------
+• Strong positive temperature correlation may indicate:
+  - Biogenic emissions (vegetation)
+  - Photochemical secondary formation
+  - Evaporation of volatile compounds
+  - Increased mixing height effects
+
+• Strong negative temperature correlation may indicate:
+  - Residential heating sources
+  - Incomplete combustion in cold conditions
+  - Reduced atmospheric mixing
+  - Seasonal industrial patterns
+
+• Factors with weak temperature correlation may indicate:
+  - Industrial sources with constant emissions
+  - Traffic-related sources (less temperature dependent)
+  - Regional background contributions
