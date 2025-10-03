@@ -2429,4 +2429,4 @@ python pmf_source_app.py MMF9 --start-date 2023-10-01 --end-date 2023-10-30 --fa
 
 **Next Steps**: Ready for comprehensive barometric pumping research studies with robust, scientifically validated pressure derivative analysis.
 
-**Git Commit**: [To be added after commit]
+**Git Commit**: [f13f18d](https://github.com/tcpearce/mmf-pmf-analysis/commit/f13f18d0a8655be755c411f425ba5ea7c3c404da)
