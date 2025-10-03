@@ -1972,6 +1972,8 @@ Generated on 2025-10-03 15:26:21
 
 **Git Commit**: f500872
 
+
+
 ## 2025-10-03 15:48 - ✅ FIXED: Missing CLI Parameters in Dashboard Reproducibility Section
 
 **Issue**: Dashboard reports were missing several CLI parameters in the "Parameter Details" table and command reproduction section, including `--run-pca`, `--max-workers`, `--create-pdf`, `--max-factors`, and many others.
@@ -2184,3 +2186,34 @@ Generated on 2025-10-03 15:26:21
 **Impact**: Console output now provides clear, accurate labeling that helps users understand what each message represents, improving the overall user experience and making debugging easier.
 
 **Git Commit**: f500872
+
+## 2025-10-03 16:10 - ✅ ADDED: Pressure derivative (dP/dt) analysis panels to dashboard
+
+Summary: Implemented barometric pumping diagnostics to support Hypothesis 2 testing.
+
+What’s new:
+- New time series panel: Pressure (hPa) and dP/dt in hPa/hr (central-difference, aligned to PMF timebase)
+- Optional overlay: 3-hour slope (hPa/hr) via hourly resampling for robustness
+- New heatmap: Correlation of dP/dt vs factor contributions at lags 0–3 hours
+
+Technical details:
+- Compute dP/dt on the PMF analysis index using central differences, with one-sided fallback at ends
+- 3-hour slope computed on hourly-resampled pressure and reindexed to analysis timeline
+- Correlations computed between dP/dt and W (factor contributions) with lag steps derived from median dt
+- Files created:
+  - <prefix>_pressure_derivative.png
+  - <prefix>_dpdt_factor_corr.png
+
+Files Modified:
+- pmf_source_app.py: Added dP/dt computation and two plots appended to dashboard plot list
+
+Rationale:
+- Barometric pumping is driven by relatively rapid pressure falls; 1-hour derivative captures onsets
+- 3-hour slope provides a smoother, confirmatory signal
+- Lagged correlations (0–3 h) test whether factor contributions rise during/after pressure falls
+
+Impact:
+- Dashboard now includes direct diagnostics for pressure-fall events and their relationship to source factors
+- Supports targeted investigation of landfill fugitive emission episodes
+
+Git Commit: [pending in next commit]

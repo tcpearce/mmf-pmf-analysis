@@ -2840,6 +2840,93 @@ class MMFPMFAnalyzer:
         # Create basic PMF plots
         plot_files = []
         
+        # Compute pressure derivative (dP/dt) and correlations vs factors
+        try:
+            # ensure Pressure exists
+            if 'Pressure' in self.df.columns:
+                # prepare series on PMF index
+                p_series = self.df.set_index('datetime')['Pressure'].sort_index()
+                idx = self.concentration_data.index if hasattr(self, 'concentration_data') else p_series.index
+                p_on_idx = p_series.reindex(idx).interpolate(limit_direction='both')
+                time_series = idx.to_series()
+                denom_hours = (time_series.shift(-1) - time_series.shift(1)).dt.total_seconds() / 3600.0
+                dp_central = (p_on_idx.shift(-1) - p_on_idx.shift(1)) / denom_hours
+                # end points fallback to one-sided
+                dt_fwd = (time_series.shift(-1) - time_series).dt.total_seconds() / 3600.0
+                dt_bwd = (time_series - time_series.shift(1)).dt.total_seconds() / 3600.0
+                dp_fwd = (p_on_idx.shift(-1) - p_on_idx) / dt_fwd
+                dp_bwd = (p_on_idx - p_on_idx.shift(1)) / dt_bwd
+                dpdt_1h = dp_central.copy()
+                dpdt_1h = dpdt_1h.fillna(dp_fwd).fillna(dp_bwd)
+                # Optional 3h slope via hourly resample
+                p_hourly = p_series.resample('1H').mean().interpolate(limit_direction='both')
+                slope3 = (p_hourly.shift(-1) - p_hourly.shift(1)) / 2.0
+                slope3 = slope3.reindex(idx).interpolate(limit_direction='both')
+                # Plot time series
+                fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 6), sharex=True)
+                ax1.plot(idx, p_on_idx, color='tab:blue', label='Pressure (hPa)')
+                ax1.set_ylabel('Pressure (hPa)')
+                ax1.grid(True, alpha=0.3)
+                ax1.legend(loc='upper right')
+                ax2.plot(idx, dpdt_1h, color='tab:red', label='dP/dt (hPa/hr, ~1h)')
+                try:
+                    ax2.plot(idx, slope3, color='tab:orange', alpha=0.6, label='3h slope (hPa/hr)')
+                except Exception:
+                    pass
+                ax2.axhline(0, color='k', linewidth=1, alpha=0.5)
+                ax2.set_ylabel('dP/dt (hPa/hr)')
+                ax2.set_xlabel('Time')
+                ax2.grid(True, alpha=0.3)
+                ax2.legend(loc='upper right')
+                plt.tight_layout()
+                dpdt_plot_path = dashboard_dir / f"{self.filename_prefix}_pressure_derivative.png"
+                plt.savefig(dpdt_plot_path, dpi=300, bbox_inches='tight', facecolor='white')
+                plt.close()
+                plot_files.append(dpdt_plot_path)
+                print(f"   [PRESSURE] Saved: pressure_derivative.png")
+                # Compute lagged correlations vs factor contributions (0-3 h)
+                try:
+                    import numpy as np
+                    n_factors = F_profiles.shape[0]
+                    factor_names = [f"Factor_{i+1}" for i in range(n_factors)]
+                    G_df = pd.DataFrame(G_contributions, index=idx, columns=factor_names)
+                    # Determine steps per hour from median dt
+                    med_dt = np.median(np.diff(idx.values).astype('timedelta64[s]').astype(float))
+                    med_dt_h = med_dt / 3600.0 if med_dt and med_dt > 0 else 1.0
+                    step_per_hour = max(1, int(round(1.0 / med_dt_h)))
+                    lags_hours = [0, 1, 2, 3]
+                    corr_mat = np.full((n_factors, len(lags_hours)), np.nan)
+                    for j, lag in enumerate(lags_hours):
+                        shifted = dpdt_1h.shift(-lag * step_per_hour)
+                        for i in range(n_factors):
+                            s = pd.concat([shifted, G_df.iloc[:, i]], axis=1).dropna()
+                            if len(s) > 5:
+                                corr_mat[i, j] = s.iloc[:, 0].corr(s.iloc[:, 1])
+                    # Plot heatmap
+                    fig, ax = plt.subplots(figsize=(2.0 + 1.0*len(lags_hours), 0.8 + 0.5*n_factors))
+                    im = ax.imshow(corr_mat, aspect='auto', cmap='RdBu_r', vmin=-1, vmax=1)
+                    ax.set_xticks(range(len(lags_hours)))
+                    ax.set_xticklabels([f"lag {h}h" for h in lags_hours])
+                    ax.set_yticks(range(n_factors))
+                    ax.set_yticklabels(factor_names)
+                    ax.set_title('Correlation: dP/dt vs Factor contributions')
+                    cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+                    cbar.set_label('Pearson r')
+                    plt.tight_layout()
+                    corr_plot_path = dashboard_dir / f"{self.filename_prefix}_dpdt_factor_corr.png"
+                    plt.savefig(corr_plot_path, dpi=300, bbox_inches='tight', facecolor='white')
+                    plt.close()
+                    plot_files.append(corr_plot_path)
+                    print(f"   [PRESSURE] Saved: dpdt_factor_corr.png")
+                except Exception as e:
+                    print(f"[WARN] Could not compute dP/dt factor correlations: {e}")
+                # Store for HTML context (optional)
+                self._dpdt_series = dpdt_1h
+            else:
+                print("[WARN] Pressure column not found; skipping dP/dt plots")
+        except Exception as e:
+            print(f"[WARN] Failed to generate dP/dt analysis: {e}")
+        
         # Compute and save closure metrics for mass balance analysis
         try:
             print("   [CLOSURE] Computing species-level closure metrics...")
