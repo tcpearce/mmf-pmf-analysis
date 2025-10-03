@@ -1297,7 +1297,7 @@ class MMFPMFAnalyzer:
         # Select all applicable species for PMF analysis
         if self.remove_voc:
             all_species = gas_species + particle_species
-        print(f"[EXCLUDE] VOC species excluded from PMF analysis")
+            print(f"[EXCLUDE] VOC species excluded from PMF analysis")
         else:
             # Use actual detected VOC column names instead of generic names
             all_species = gas_species + particle_species + available_vocs
