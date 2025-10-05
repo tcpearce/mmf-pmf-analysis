@@ -2430,3 +2430,136 @@ python pmf_source_app.py MMF9 --start-date 2023-10-01 --end-date 2023-10-30 --fa
 **Next Steps**: Ready for comprehensive barometric pumping research studies with robust, scientifically validated pressure derivative analysis.
 
 **Git Commit**: [f13f18d](https://github.com/tcpearce/mmf-pmf-analysis/commit/f13f18d0a8655be755c411f425ba5ea7c3c404da)
+
+## 2025-10-04 13:24 - 🎨 ENHANCED: H2S Factor Color Management System
+
+**Status**: **IMPLEMENTED** - H2S-dominant factor automatically identified and colored red across all visualizations.
+
+### New H2S Color Management Features:
+
+**1. Automatic H2S Factor Identification** ✨
+- **Enhancement**: ColorManager now analyzes factor profiles (H matrix) to identify which factor has the highest H2S contribution
+- **Implementation**: Added `_identify_h2s_factor()` method that finds H2S species column and determines dominant factor
+- **Smart Detection**: Searches for 'H2S' in species names (case-insensitive) and calculates maximum contribution across factors
+
+**2. Consistent Red Color Assignment** 🔴
+- **Feature**: H2S-dominant factor automatically assigned red color (#d62728) across all plots
+- **Consistency**: Same red color used in factor profiles, time series, scatter plots, wind analysis, and polar plots
+- **Visual Priority**: Red factor easily identifiable across entire PMF dashboard
+
+**3. Enhanced Visual Prominence** 📈
+- **Plotting Order**: H2S factor always plotted last (top layer) for maximum visibility
+- **Enhanced Styling**: H2S factor gets increased alpha (0.8 vs 0.6), larger markers (25 vs 20 px), bold edges
+- **Top Layer**: Ensures H2S factor data points appear above other factors in all scatter plots
+
+**4. Comprehensive Plot Coverage** 🎯
+- **Factor Contributions Time Series**: H2S factor plotted with thicker line (2.5px vs 2px)
+- **Pressure Derivative Scatter**: H2S points more prominent with enhanced styling
+- **Wind Analysis Plots**: All wind vs factor plots updated (scatter, polar, binned analysis)
+- **Interactive Elements**: Plotting order maintained in legends and hover information
+
+### Technical Implementation:
+
+**ColorManager Class Enhanced**:
+- `__init__()` now accepts `factor_profiles` parameter (H matrix)
+- `_identify_h2s_factor()` finds factor with maximum H2S contribution
+- `_get_factor_colors()` assigns red specifically to H2S factor
+- `get_factor_plot_order()` returns factor indices with H2S factor last
+- `is_h2s_factor()` utility method for styling decisions
+
+**Plot Integration**:
+- Updated factor time series plotting (both datetime and index-based)
+- Enhanced pressure derivative scatter plot with H2S prominence
+- Modified wind analysis plots (scatter, polar, stacked bars, binned analysis)
+- Maintained consistent styling across all factor visualizations
+
+**PMF Analysis Integration**:
+- ColorManager instantiation updated to pass H matrix: `ColorManager(factors, species_names, factor_profiles)`
+- Automatic H2S identification during PMF analysis setup
+- Logging added to track H2S factor identification and red color assignment
+
+**User Experience**:
+- **Automatic**: No user configuration required - system automatically detects and highlights H2S factor
+- **Informative**: Console output shows which factor was identified as H2S-dominant
+- **Consistent**: Same red factor appears across all dashboard visualizations
+- **Prominent**: H2S factor data always visible on top layer of plots
+
+**Example Console Output**:
+```
+[COLOR] H2S-dominant factor identified: Factor 3 (H2S contribution: 0.847)
+[COLOR] Factor 3 assigned red color (H2S-dominant)
+```
+
+**Files Modified**:
+- `pmf_source_app.py` - Enhanced ColorManager class and updated all plotting functions
+
+**Impact**: H2S source apportionment analysis significantly improved with automatic visual emphasis on the most relevant factor for odor impact assessment.
+
+## 2025-10-05 10:28 - 🎨 ENHANCED: Sankey Diagram H2S Color Integration
+
+**Status**: **COMPLETED** - All Sankey diagram methods now use H2S color management system.
+
+### Sankey Diagram H2S Color Integration:
+
+**1. Plotly Interactive Sankey** 🌐
+- **Updated**: ColorManager integration replaces hardcoded factor colors
+- **Enhancement**: Hex to RGBA color conversion for Plotly compatibility
+- **Flow Order**: H2S factor connections drawn last for maximum prominence
+- **Consistency**: Red H2S factor matches all other dashboard visualizations
+
+**2. Custom Flow Sankey (Primary Fallback)** 📊
+- **Enhanced Nodes**: H2S factor gets larger size, higher alpha, bold black edges
+- **Enhanced Flows**: H2S connections 20% wider with enhanced visibility
+- **Layering**: H2S elements drawn with higher z-order (4 vs 3) for top layer
+- **Typography**: H2S factor labels use larger font size (13px vs 12px)
+
+**3. Flow Chart Alternative (Circular Layout)** ⭕
+- **Node Enhancement**: H2S factor 20% larger with 2px black edges vs 1px
+- **Connection Enhancement**: H2S flows 30% thicker with higher alpha (0.7 vs 0.5)
+- **Font Enhancement**: H2S factor labels use 11px vs 10px font
+- **Plotting Order**: Consistent layering with H2S factor on top
+
+**4. Matplotlib Sankey Proper** 📈
+- **Color Integration**: Uses ColorManager hex colors consistently
+- **Text Enhancement**: H2S factor gets 12px font with colored background highlight
+- **Processing Order**: H2S plotting order maintained for proper layering
+- **Error Resilience**: Enhanced error handling with color consistency
+
+### Technical Implementation:
+
+**Color System Integration**:
+- All Sankey methods now call `ColorManager.get_factor_colors()`
+- Plotly methods use hex-to-RGBA conversion utility
+- Species colors also integrated via `ColorManager.get_species_color()`
+- Red color (#d62728) exclusively reserved for H2S-dominant factor
+
+**Plotting Order Management**:
+- All methods use `ColorManager.get_factor_plot_order()`
+- H2S factor consistently drawn/rendered last across all Sankey types
+- Proper z-order and layering ensures H2S visibility
+- Interactive and static versions maintain consistent ordering
+
+**Visual Enhancement System**:
+- H2S factor detection via `ColorManager.is_h2s_factor()`
+- Automated styling enhancements (size, alpha, edges, fonts)
+- Flow/connection thickness increased for H2S factor
+- Consistent enhancement ratios across all visualization methods
+
+**Robustness**:
+- All 4 Sankey fallback methods updated consistently
+- Error handling maintains color scheme integrity
+- Cross-platform compatibility (Windows/Linux/Mac)
+- Interactive HTML and static PNG both use H2S colors
+
+**User Experience**:
+- **Visual Consistency**: H2S factor red across ALL dashboard visualizations
+- **Automatic Detection**: No user configuration - system auto-identifies H2S factor
+- **Enhanced Visibility**: H2S factor and connections clearly prominent
+- **Professional Output**: Consistent color scheme in reports and publications
+
+**Files Modified**:
+- `pmf_source_app.py` - Updated all 4 Sankey diagram methods with H2S color integration
+
+**Impact**: Complete visual consistency achieved - H2S-dominant factor now prominently displayed in red across every single PMF dashboard visualization, including all Sankey diagram variants.
+
+**Git Commit**: [Insert commit hash after GitHub update]

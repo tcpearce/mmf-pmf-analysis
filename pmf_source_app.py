@@ -96,30 +96,87 @@ except ImportError:
 class ColorManager:
     """Manages consistent colors for factors and species across all PMF plots."""
     
-    def __init__(self, n_factors, species_names):
+    def __init__(self, n_factors, species_names, factor_profiles=None):
         self.n_factors = n_factors
         self.species_names = species_names
+        self.factor_profiles = factor_profiles
+        self.h2s_factor_idx = None
+        
+        # Identify H2S-dominant factor if profiles are provided
+        self._identify_h2s_factor()
         
         # Define consistent color schemes
         self.factor_colors = self._get_factor_colors(n_factors)
         self.species_colors = self._get_species_colors(species_names)
         
-    def _get_factor_colors(self, n_factors):
-        """Get consistent colors for PMF factors."""
-        # Use qualitative color palette for factors - distinct and easily distinguishable
-        if n_factors <= 3:
-            # Use primary colors for small number of factors
-            base_colors = ['#1f77b4', '#ff7f0e', '#2ca02c']  # Blue, Orange, Green
-        elif n_factors <= 6:
-            # Use Set2 palette for medium number
-            base_colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
-        else:
-            # Use larger palette for many factors
-            import matplotlib.pyplot as plt
-            cmap = plt.cm.get_cmap('tab20')  # 20 distinct colors
-            base_colors = [cmap(i) for i in np.linspace(0, 1, n_factors)]
+    def _identify_h2s_factor(self):
+        """Identify which factor has the highest H2S contribution."""
+        if self.factor_profiles is None:
+            return
         
-        return base_colors[:n_factors]
+        # Find H2S column index
+        h2s_col_idx = None
+        for i, species in enumerate(self.species_names):
+            if 'H2S' in species.upper():
+                h2s_col_idx = i
+                break
+        
+        if h2s_col_idx is not None:
+            # Find factor with highest H2S contribution
+            h2s_contributions = self.factor_profiles[:, h2s_col_idx]
+            self.h2s_factor_idx = int(np.argmax(h2s_contributions))
+            print(f"[COLOR] H2S-dominant factor identified: Factor {self.h2s_factor_idx + 1} (H2S contribution: {h2s_contributions[self.h2s_factor_idx]:.3f})")
+        else:
+            print("[COLOR] H2S species not found in dataset - using standard coloring")
+        
+    def _get_factor_colors(self, n_factors):
+        """Get consistent colors for PMF factors with H2S-dominant factor in red."""
+        # Define color palette EXCLUDING red - red is reserved for H2S factor only
+        non_red_colors = [
+            '#1f77b4',  # Blue
+            '#ff7f0e',  # Orange
+            '#2ca02c',  # Green
+            '#9467bd',  # Purple
+            '#8c564b',  # Brown
+            '#e377c2',  # Pink
+            '#7f7f7f',  # Gray
+            '#bcbd22',  # Olive
+            '#17becf',  # Cyan
+            '#ffbb78',  # Light Orange
+            '#98df8a',  # Light Green
+            '#c5b0d5',  # Light Purple
+            '#c49c94',  # Light Brown
+            '#f7b6d3',  # Light Pink
+            '#c7c7c7',  # Light Gray
+            '#dbdb8d',  # Light Olive
+            '#9edae5',  # Light Cyan
+            '#ff9896',  # Light Red (but not pure red)
+            '#aec7e8',  # Light Blue
+            '#ffcc99'   # Peach
+        ]
+        
+        # Use appropriate number of colors based on factors needed
+        if n_factors <= len(non_red_colors):
+            factor_colors = non_red_colors[:n_factors]
+        else:
+            # For many factors, use matplotlib colormap but exclude red range
+            import matplotlib.pyplot as plt
+            import matplotlib.colors as mcolors
+            
+            # Generate colors avoiding red hues (0.8-1.2 in HSV space)
+            factor_colors = []
+            for i in range(n_factors):
+                hue = (i / n_factors) * 0.8  # Use only 0-0.8 of hue range to avoid red
+                color = mcolors.hsv_to_rgb([hue, 0.8, 0.8])
+                factor_colors.append(mcolors.rgb2hex(color))
+        
+        # Now assign red color EXCLUSIVELY to H2S-dominant factor
+        if self.h2s_factor_idx is not None:
+            red_color = '#d62728'  # Standard matplotlib red - RESERVED FOR H2S ONLY
+            factor_colors[self.h2s_factor_idx] = red_color
+            print(f"[COLOR] Factor {self.h2s_factor_idx + 1} assigned red color (H2S-dominant) - red reserved exclusively for H2S factor")
+        
+        return factor_colors
     
     def _get_species_colors(self, species_names):
         """Get consistent colors for chemical species by category."""
@@ -168,6 +225,21 @@ class ColorManager:
     def get_species_colors_list(self):
         """Get species colors in order matching species_names."""
         return [self.species_colors[species] for species in self.species_names]
+    
+    def get_factor_plot_order(self):
+        """Get factor indices in plotting order with H2S-dominant factor last."""
+        factor_order = list(range(self.n_factors))
+        
+        # Move H2S factor to the end for top-layer plotting
+        if self.h2s_factor_idx is not None:
+            factor_order.remove(self.h2s_factor_idx)
+            factor_order.append(self.h2s_factor_idx)
+            
+        return factor_order
+    
+    def is_h2s_factor(self, factor_idx):
+        """Check if the given factor index is the H2S-dominant factor."""
+        return self.h2s_factor_idx is not None and factor_idx == self.h2s_factor_idx
 
 class MMFPMFAnalyzer:
     def __init__(self, station=None, data_dir=None, patterns=None, start_date=None, end_date=None, output_dir="pmf_results", 
@@ -2478,8 +2550,9 @@ class MMFPMFAnalyzer:
             # Store species names for plotting
             self.species_names = species_names
             
-            # Initialize color manager for consistent plotting
-            self.color_manager = ColorManager(self.factors, self.species_names)
+            # Initialize color manager for consistent plotting (with H matrix for H2S factor identification)
+            factor_profiles = self.best_model.H  # H matrix: factors x species
+            self.color_manager = ColorManager(self.factors, self.species_names, factor_profiles)
             print(f"[UI] Initialized consistent color scheme for {self.factors} factors and {len(self.species_names)} species")
             
         except Exception as e:
@@ -3009,11 +3082,18 @@ class MMFPMFAnalyzer:
                 datetime_index = pd.to_datetime(conc_data.index)
                 has_datetime = True
                 
-                # Plot with datetime x-axis
-                for i in range(G_contributions.shape[1]):
+                # Plot factors in order with H2S factor last (for top layer visibility)
+                factor_plot_order = self.color_manager.get_factor_plot_order()
+                
+                for i in factor_plot_order:
                     factor_color = self.color_manager.get_factor_color(i)
+                    # Make H2S factor more prominent
+                    is_h2s = self.color_manager.is_h2s_factor(i)
+                    linewidth = 2.5 if is_h2s else 2
+                    alpha_val = 0.9 if is_h2s else 0.8
+                    
                     ax.plot(datetime_index, G_contributions[:, i], 
-                            label=f'Factor {i+1}', linewidth=2, alpha=0.8, color=factor_color)
+                            label=f'Factor {i+1}', linewidth=linewidth, alpha=alpha_val, color=factor_color)
                 
                 ax.set_xlabel('Date/Time')
                 # Format x-axis for better readability
@@ -3027,10 +3107,15 @@ class MMFPMFAnalyzer:
                 time_index = np.arange(G_contributions.shape[0])
                 has_datetime = False
                 
-                for i in range(G_contributions.shape[1]):
+                for i in factor_plot_order:
                     factor_color = self.color_manager.get_factor_color(i)
+                    # Make H2S factor more prominent
+                    is_h2s = self.color_manager.is_h2s_factor(i)
+                    linewidth = 2.5 if is_h2s else 2
+                    alpha_val = 0.9 if is_h2s else 0.8
+                    
                     ax.plot(time_index, G_contributions[:, i], 
-                            label=f'Factor {i+1}', linewidth=2, alpha=0.8, color=factor_color)
+                            label=f'Factor {i+1}', linewidth=linewidth, alpha=alpha_val, color=factor_color)
                 
                 ax.set_xlabel('Sample Index')
             
@@ -5708,9 +5793,18 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
             valid_mask = ~wind_df['wind_dir'].isna()
             wd = wind_df.loc[valid_mask, 'wind_dir'].values
             
-            for f in range(self.factors):
+            # Plot factors in order with H2S factor last (for top layer visibility)
+            factor_plot_order = self.color_manager.get_factor_plot_order()
+            
+            for f in factor_plot_order:
                 fc = G_wind[valid_mask, f]
-                ax3.scatter(wd, fc, alpha=0.6, s=20, color=colors[f], label=f'Factor {f+1}')
+                # Make H2S factor more prominent
+                is_h2s = self.color_manager.is_h2s_factor(f)
+                alpha_val = 0.8 if is_h2s else 0.6
+                marker_size = 25 if is_h2s else 20
+                
+                ax3.scatter(wd, fc, alpha=alpha_val, s=marker_size, color=colors[f], 
+                           label=f'Factor {f+1}', edgecolors='black', linewidth=0.5 if is_h2s else 0)
             
             ax3.set_xlabel('Wind Direction ( deg)')
             ax3.set_ylabel('Factor Contribution')
@@ -5801,11 +5895,12 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
                 if np.sum(mask) > 0:
                     sector_means[i, :] = np.mean(G_wind[mask, :], axis=0)
             
-            # Create stacked bar chart
+            # Create stacked bar chart (H2S factor will be on top as it's plotted last)
             x_pos = np.arange(len(sectors))
             bottom = np.zeros(len(sectors))
+            factor_plot_order = self.color_manager.get_factor_plot_order()
             
-            for f in range(self.factors):
+            for f in factor_plot_order:
                 ax5.bar(x_pos, sector_means[:, f], bottom=bottom, 
                        label=f'Factor {f+1}', alpha=0.8, color=colors[f])
                 bottom += sector_means[:, f]
@@ -5825,10 +5920,15 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
             valid_mask = ~wind_df['wind_speed'].isna()
             ws = wind_df.loc[valid_mask, 'wind_speed'].values
             
-            for f in range(self.factors):
+            for f in factor_plot_order:
                 fc = G_wind[valid_mask, f]
-                ax6.scatter(ws, fc, alpha=0.6, s=30, color=colors[f], 
-                           label=f'Factor {f+1}')
+                # Make H2S factor more prominent
+                is_h2s = self.color_manager.is_h2s_factor(f)
+                alpha_val = 0.8 if is_h2s else 0.6
+                marker_size = 35 if is_h2s else 30
+                
+                ax6.scatter(ws, fc, alpha=alpha_val, s=marker_size, color=colors[f], 
+                           label=f'Factor {f+1}', edgecolors='black', linewidth=0.5 if is_h2s else 0)
                 
                 # Add trend line if enough points
                 if len(ws) > 10:
@@ -5866,7 +5966,8 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
                 x = np.arange(len(ws_labels))
                 width = 0.8 / self.factors
                 
-                for f in range(self.factors):
+                for f in factor_plot_order:
+                    # Use original factor index for offset calculation to maintain spacing
                     offset = (f - self.factors/2) * width
                     ax7.bar(x + offset, bin_means[:, f], width, 
                            label=f'Factor {f+1}', alpha=0.8, color=colors[f])
@@ -7005,9 +7106,68 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
             # Remove any remaining NaN values
             dpdt_valid_count = dpdt_1h.notna().sum()
             if dpdt_valid_count > 0:
-                print(f"   [DEBUG] Final dP/dt range: {dpdt_1h.min():.3f} to {dpdt_1h.max():.3f} hPa/hr")
+                print(f"   [DEBUG] Raw dP/dt range: {dpdt_1h.min():.3f} to {dpdt_1h.max():.3f} hPa/hr")
             else:
                 print(f"   [DEBUG] No valid derivatives calculated")
+            
+            # Apply additional zero-phase low-pass filtering to the derivative signal itself
+            # Use lower cutoff frequency for smoother barometric analysis
+            dpdt_1h_filtered = None
+            if dpdt_valid_count > 5:  # Need sufficient points for filtering
+                try:
+                    from scipy import signal
+                    
+                    # Design even lower cutoff filter for derivative smoothing
+                    # Use 48-hour period cutoff for very smooth barometric analysis
+                    derivative_cutoff = 1.0 / (48 * 3600)  # 1/(48 hours) in Hz
+                    
+                    # Estimate sampling frequency from derivative timestamps
+                    valid_dpdt = dpdt_1h.dropna()
+                    if len(valid_dpdt) >= 3:
+                        time_diffs_dt = np.diff(valid_dpdt.index)
+                        # Handle both pandas.Timedelta and numpy.timedelta64 objects
+                        interval_seconds = []
+                        for td in time_diffs_dt:
+                            if hasattr(td, 'total_seconds'):
+                                interval_seconds.append(td.total_seconds())
+                            else:
+                                # Handle numpy.timedelta64 by converting to seconds
+                                interval_seconds.append(td / np.timedelta64(1, 's'))
+                        median_interval = np.median(interval_seconds)
+                        fs_derivative = 1.0 / median_interval  # Sampling frequency in Hz
+                        nyquist_derivative = fs_derivative / 2
+                        normalized_cutoff_derivative = derivative_cutoff / nyquist_derivative
+                        
+                        print(f"   [DEBUG] Derivative filtering: {len(valid_dpdt)} points, median interval: {median_interval/3600:.2f}h")
+                        print(f"   [DEBUG] Applying 48-hour cutoff filter to derivative signal")
+                        
+                        # Only filter if we have reasonable parameters
+                        if 0 < normalized_cutoff_derivative < 0.45:  # Nyquist limit with safety margin
+                            # Create 4th order Butterworth filter for derivatives
+                            b_deriv, a_deriv = signal.butter(4, normalized_cutoff_derivative, btype='low', analog=False)
+                            
+                            # Apply zero-phase filtering to derivative values
+                            dpdt_filtered_values = signal.filtfilt(b_deriv, a_deriv, valid_dpdt.values)
+                            
+                            # Create filtered derivative series
+                            dpdt_1h_filtered = pd.Series(index=idx, dtype=float)
+                            dpdt_1h_filtered.loc[valid_dpdt.index] = dpdt_filtered_values
+                            
+                            # Interpolate to full PMF timeline
+                            dpdt_1h_filtered = dpdt_1h_filtered.reindex(idx).interpolate(method='time', limit_direction='both')
+                            if dpdt_1h_filtered.isna().any():
+                                dpdt_1h_filtered = dpdt_1h_filtered.ffill().bfill()
+                            
+                            print(f"   [DEBUG] Filtered dP/dt range: {dpdt_1h_filtered.min():.3f} to {dpdt_1h_filtered.max():.3f} hPa/hr")
+                        else:
+                            print(f"   [DEBUG] Normalized cutoff {normalized_cutoff_derivative:.3f} outside valid range - skipping derivative filtering")
+                    else:
+                        print(f"   [DEBUG] Insufficient points for derivative filtering")
+                        
+                except Exception as e:
+                    print(f"   [DEBUG] Derivative filtering failed: {e} - using unfiltered derivatives")
+            else:
+                print(f"   [DEBUG] Insufficient derivatives ({dpdt_valid_count}) for additional filtering")
             
             # Calculate smoother hourly derivative for comparison
             try:
@@ -7063,12 +7223,39 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
             # Share x-axis only between ax1 and ax2 (both are time series)
             ax2.sharex(ax1)
             
-            # Configure datetime formatting for matplotlib
+            # Configure datetime formatting for matplotlib with improved readability
             import matplotlib.dates as mdates
-            # Set major and minor ticks for datetime axis
-            ax1.xaxis.set_major_locator(mdates.HourLocator(interval=6))
-            ax1.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d %H:%M'))
-            ax1.xaxis.set_minor_locator(mdates.HourLocator(interval=1))
+            
+            # Determine appropriate tick spacing based on data duration
+            time_span_days = (idx.max() - idx.min()).days
+            
+            if time_span_days <= 2:  # 1-2 days: show every 6 hours
+                major_interval = 6
+                minor_interval = 2
+                date_format = '%m-%d\n%H:%M'
+            elif time_span_days <= 7:  # 3-7 days: show daily
+                major_interval = 24  
+                minor_interval = 6
+                date_format = '%m-%d\n%H:%M'
+            elif time_span_days <= 30:  # 8-30 days: show every 2-3 days
+                major_interval = 72  # Every 3 days
+                minor_interval = 24  # Daily minor ticks
+                date_format = '%m-%d'
+            else:  # > 30 days: show weekly
+                major_interval = 168  # Weekly (7*24 hours)
+                minor_interval = 24   # Daily minor ticks
+                date_format = '%m-%d'
+            
+            # Apply formatting to shared time axes (ax1 and ax2)
+            for ax_time in [ax1, ax2]:
+                ax_time.xaxis.set_major_locator(mdates.HourLocator(interval=major_interval))
+                ax_time.xaxis.set_major_formatter(mdates.DateFormatter(date_format))
+                ax_time.xaxis.set_minor_locator(mdates.HourLocator(interval=minor_interval))
+                # Rotate labels if needed and add padding
+                if time_span_days > 7:
+                    ax_time.tick_params(axis='x', rotation=45)
+                # Add some padding to prevent label overlap
+                ax_time.tick_params(axis='x', pad=8)
             
             # Plot 1: Pressure time series (both raw and filtered if available) - REVERT TO WORKING VERSION
             if p_on_idx_filtered is not None:
@@ -7096,9 +7283,21 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
             ax1.grid(True, alpha=0.3)
             ax1.legend(loc='upper right')
             
-            # Plot 2: Pressure derivative - REVERT TO WORKING VERSION
+            # Plot 2: Pressure derivative - Show both raw and filtered (if available)
             if dpdt_valid_count > 0:
-                ax2.plot(idx, dpdt_1h, color='tab:red', label=f'dP/dt (hPa/hr): {dpdt_min:.3f}-{dpdt_max:.3f}', linewidth=1.5)
+                # Plot raw derivatives
+                ax2.plot(idx, dpdt_1h, color='lightcoral', alpha=0.6, label=f'Raw dP/dt (hPa/hr): {dpdt_min:.3f}-{dpdt_max:.3f}', linewidth=1, zorder=1)
+                
+                # Plot filtered derivatives if available
+                if dpdt_1h_filtered is not None:
+                    dpdt_filtered_min, dpdt_filtered_max = dpdt_1h_filtered.min(), dpdt_1h_filtered.max()
+                    ax2.plot(idx, dpdt_1h_filtered, color='tab:red', label=f'48-Hour Filtered dP/dt (hPa/hr): {dpdt_filtered_min:.3f}-{dpdt_filtered_max:.3f}', linewidth=2, zorder=2)
+                else:
+                    # If no filtering applied, use original styling
+                    ax2.lines[0].set_color('tab:red')
+                    ax2.lines[0].set_linewidth(1.5)
+                    ax2.lines[0].set_alpha(1.0)
+                    ax2.lines[0].set_label(f'dP/dt (hPa/hr): {dpdt_min:.3f}-{dpdt_max:.3f}')
             else:
                 ax2.plot(idx, dpdt_1h, color='tab:red', label='dP/dt (hPa/hr): No data', linewidth=1.5)
             
@@ -7118,7 +7317,12 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
             ax2.axhline(0, color='k', linewidth=1, alpha=0.5)
             ax2.set_ylabel('dP/dt (hPa/hr)')
             ax2.set_xlabel('Time')
-            ax2.set_title(f'Pressure Derivative - 6-Hour Window (Range: {dpdt_min:.4f} - {dpdt_max:.4f} hPa/hr)')
+            # Update title based on filtering status
+            if dpdt_1h_filtered is not None:
+                dpdt_filtered_min, dpdt_filtered_max = dpdt_1h_filtered.min(), dpdt_1h_filtered.max()
+                ax2.set_title(f'Pressure Derivatives: 6-Hour Window + 48-Hour Filter (Range: {dpdt_filtered_min:.4f} - {dpdt_filtered_max:.4f} hPa/hr)')
+            else:
+                ax2.set_title(f'Pressure Derivative - 6-Hour Window (Range: {dpdt_min:.4f} - {dpdt_max:.4f} hPa/hr)')
             ax2.grid(True, alpha=0.3)
             ax2.legend(loc='upper right')
             
@@ -7132,22 +7336,38 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
                     # Fallback colors if color manager not available
                     factor_colors = plt.cm.Set1(np.linspace(0, 1, n_factors))
                 
-                # Plot each factor with its own color
-                for f in range(n_factors):
+                # Plot factors in order with H2S factor last (for top layer visibility)
+                factor_plot_order = self.color_manager.get_factor_plot_order() if hasattr(self, 'color_manager') else list(range(n_factors))
+                
+                for f in factor_plot_order:
                     factor_contrib = G_contributions[:, f]
                     
                     # Create scatter plot with factor-colored points
                     # Extract actual pressure derivative VALUES (not datetime index)
-                    dpdt_values = dpdt_1h.values  # Use .values to get data array, not index
+                    # Use filtered derivatives for correlation analysis if available
+                    if dpdt_1h_filtered is not None:
+                        dpdt_values = dpdt_1h_filtered.values  # Use filtered derivatives for cleaner correlations
+                    else:
+                        dpdt_values = dpdt_1h.values  # Fall back to raw derivatives
                     valid_data_mask = ~(np.isnan(dpdt_values) | np.isnan(factor_contrib))
                     if valid_data_mask.sum() > 0:
+                        # Adjust alpha and marker size for H2S factor (red) to make it more prominent
+                        is_h2s = hasattr(self, 'color_manager') and self.color_manager.is_h2s_factor(f)
+                        alpha_val = 0.8 if is_h2s else 0.6
+                        marker_size = 25 if is_h2s else 20
+                        edge_width = 1.0 if is_h2s else 0.5
+                        
                         ax3.scatter(dpdt_values[valid_data_mask], factor_contrib[valid_data_mask], 
-                                  c=[factor_colors[f]], alpha=0.6, s=20,
-                                  label=f'Factor {f+1}', edgecolors='black', linewidth=0.5)
+                                  c=[factor_colors[f]], alpha=alpha_val, s=marker_size,
+                                  label=f'Factor {f+1}', edgecolors='black', linewidth=edge_width)
                 
                 ax3.set_xlabel('Pressure Derivative (hPa/hr)')
                 ax3.set_ylabel('Factor Contribution')
-                ax3.set_title('Factor Contributions vs 6-Hour Pressure Derivative (Barometric Pumping Analysis)')
+                # Update title based on filtering used
+                if dpdt_1h_filtered is not None:
+                    ax3.set_title('Factor Contributions vs Filtered Pressure Derivatives (Barometric Pumping Analysis)')
+                else:
+                    ax3.set_title('Factor Contributions vs 6-Hour Pressure Derivative (Barometric Pumping Analysis)')
                 ax3.grid(True, alpha=0.3)
                 ax3.legend(loc='upper right', ncol=min(n_factors, 3))  # Max 3 columns for legend
                 
@@ -7545,7 +7765,10 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         # Threshold for minimum flow to show (to avoid clutter)
         min_flow_threshold = 0.01 * np.max(factor_species_flows)  # 1% of maximum flow
         
-        for factor_idx in range(self.factors):
+        # Use H2S plotting order to ensure H2S factor connections are drawn last (most prominent)
+        factor_plot_order = self.color_manager.get_factor_plot_order()
+        
+        for factor_idx in factor_plot_order:
             for species_idx in range(len(self.species_names)):
                 flow_value = factor_species_flows[factor_idx, species_idx]
                 
@@ -7554,17 +7777,20 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
                     targets.append(self.factors + species_idx)  # Species node index (offset by n_factors)
                     values.append(flow_value)
         
-        # Define colors for factors and species
-        factor_colors = ['rgba(31, 119, 180, 0.8)', 'rgba(255, 127, 14, 0.8)', 
-                        'rgba(44, 160, 44, 0.8)', 'rgba(214, 39, 40, 0.8)',
-                        'rgba(148, 103, 189, 0.8)', 'rgba(140, 86, 75, 0.8)',
-                        'rgba(227, 119, 194, 0.8)', 'rgba(127, 127, 127, 0.8)']
+        # Use ColorManager for consistent colors (including H2S red factor)
+        factor_colors_hex = self.color_manager.get_factor_colors()
         
-        species_colors = ['rgba(188, 189, 34, 0.6)'] * len(self.species_names)
+        # Convert hex colors to rgba format for Plotly
+        def hex_to_rgba(hex_color, alpha=0.8):
+            hex_color = hex_color.lstrip('#')
+            r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+            return f'rgba({r}, {g}, {b}, {alpha})'
         
-        # Ensure we have enough colors
-        while len(factor_colors) < self.factors:
-            factor_colors.extend(factor_colors)
+        factor_colors = [hex_to_rgba(color) for color in factor_colors_hex]
+        
+        # Use ColorManager for species colors too
+        species_colors_hex = [self.color_manager.get_species_color(species) for species in self.species_names]
+        species_colors = [hex_to_rgba(color, 0.6) for color in species_colors_hex]
         
         node_colors = factor_colors[:self.factors] + species_colors
         
@@ -7867,12 +8093,25 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         factor_colors = self.color_manager._get_factor_colors(n_factors)
         species_colors = self.color_manager._get_species_colors(self.species_names)
         
-        # Draw factor nodes
-        for i, pos in enumerate(factor_positions):
-            circle = plt.Circle(pos, 0.1, color=factor_colors[i], alpha=0.8)
+        # Draw factor nodes using plotting order for consistency
+        factor_plot_order = self.color_manager.get_factor_plot_order()
+        
+        for i in factor_plot_order:
+            pos = factor_positions[i]
+            is_h2s = self.color_manager.is_h2s_factor(i)
+            
+            # Enhanced styling for H2S factor
+            alpha_val = 0.9 if is_h2s else 0.8
+            edge_width = 2 if is_h2s else 1
+            size = 0.12 if is_h2s else 0.1
+            
+            circle = plt.Circle(pos, size, color=factor_colors[i], alpha=alpha_val, 
+                               edgecolor='black', linewidth=edge_width)
             ax.add_patch(circle)
+            
+            font_size = 11 if is_h2s else 10
             ax.text(pos[0]*1.15, pos[1]*1.15, f'F{i+1}', ha='center', va='center', 
-                   fontweight='bold', fontsize=10)
+                   fontweight='bold', fontsize=font_size)
         
         # Draw species nodes  
         for i, pos in enumerate(species_positions):
@@ -7884,20 +8123,25 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
             ax.text(pos[0]*1.2, pos[1]*1.2, name, ha='center', va='center', 
                    fontweight='bold', fontsize=8)
         
-        # Draw connections for significant flows
+        # Draw connections for significant flows - use plotting order for layering
         max_flow = np.max(F_profiles)
         min_flow_threshold = 0.1 * max_flow
         
-        for factor_idx in range(n_factors):
+        for factor_idx in factor_plot_order:
             for species_idx in range(n_species):
                 flow = F_profiles[factor_idx, species_idx]
                 if flow > min_flow_threshold:
                     factor_pos = factor_positions[factor_idx]
                     species_pos = species_positions[species_idx]
                     
-                    line_width = (flow / max_flow) * 5 + 0.5
+                    # Enhanced styling for H2S factor connections
+                    is_h2s = self.color_manager.is_h2s_factor(factor_idx)
+                    base_width = (flow / max_flow) * 5 + 0.5
+                    line_width = base_width * 1.3 if is_h2s else base_width
+                    alpha_val = 0.7 if is_h2s else 0.5
+                    
                     ax.plot([factor_pos[0], species_pos[0]], [factor_pos[1], species_pos[1]], 
-                           color=factor_colors[factor_idx], alpha=0.5, linewidth=line_width)
+                           color=factor_colors[factor_idx], alpha=alpha_val, linewidth=line_width)
         
         ax.set_xlim(-1.5, 1.5)
         ax.set_ylim(-1.5, 1.5)
@@ -7931,8 +8175,10 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
             # Calculate flows
             factor_species_flows = F_profiles  # Shape: (n_factors, n_species)
             
-            # Prepare flows for each factor
-            for factor_idx in range(self.factors):
+            # Prepare flows for each factor - use plotting order
+            factor_plot_order = self.color_manager.get_factor_plot_order()
+            
+            for factor_idx in factor_plot_order:
                 flows = []
                 orientations = []
                 labels = []
@@ -7961,12 +8207,19 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
             # Finish and render the Sankey diagram
             diagrams = sankey.finish()
             
-            # Apply consistent color scheme
-            factor_colors = self.color_manager._get_factor_colors(self.factors)
+            # Apply consistent color scheme using ColorManager
+            factor_colors_hex = self.color_manager.get_factor_colors()
             for i, diagram in enumerate(diagrams):
-                if i < self.factors:
-                    diagram.texts[-1].set_color(factor_colors[i])
+                if i < len(factor_colors_hex):
+                    diagram.texts[-1].set_color(factor_colors_hex[i])
                     diagram.texts[-1].set_fontweight('bold')
+                    
+                    # Enhance H2S factor styling
+                    if self.color_manager.is_h2s_factor(i):
+                        diagram.texts[-1].set_fontsize(12)
+                        diagram.texts[-1].set_bbox(dict(boxstyle='round,pad=0.3', 
+                                                       facecolor=factor_colors_hex[i], 
+                                                       alpha=0.3))
             
             plt.tight_layout()
             plot_path = dashboard_dir / f"{self.filename_prefix}_sankey_diagram.png"
@@ -8016,16 +8269,30 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         species_sizes = np.sum(factor_species_flows, axis=0)  # Total from all factors
         species_sizes = species_sizes / np.max(species_sizes) * 0.04 + 0.015  # Normalize to reasonable sizes
         
-        # Draw factor nodes (left side)
-        factor_nodes = []
-        for i, (y_pos, color, size) in enumerate(zip(factor_y_positions, factor_colors, factor_sizes)):
-            circle = plt.Circle((factor_x, y_pos), size, color=color, alpha=0.8, zorder=3)
-            ax.add_patch(circle)
-            factor_nodes.append((factor_x, y_pos, size))
+        # Draw factor nodes (left side) - use plotting order for consistent layering
+        factor_nodes = [None] * self.factors  # Pre-allocate to maintain indexing
+        factor_plot_order = self.color_manager.get_factor_plot_order()
+        
+        for plot_order_idx, factor_idx in enumerate(factor_plot_order):
+            y_pos = factor_y_positions[factor_idx]
+            color = factor_colors[factor_idx]
+            size = factor_sizes[factor_idx]
             
-            # Factor labels
-            ax.text(factor_x - 0.08, y_pos, f'Factor {i+1}', ha='right', va='center', 
-                   fontsize=12, fontweight='bold', color=color)
+            # H2S factor gets enhanced styling
+            is_h2s = self.color_manager.is_h2s_factor(factor_idx)
+            alpha_val = 0.9 if is_h2s else 0.8
+            edge_width = 2 if is_h2s else 1
+            zorder = 4 if is_h2s else 3
+            
+            circle = plt.Circle((factor_x, y_pos), size, color=color, alpha=alpha_val, 
+                               zorder=zorder, edgecolor='black', linewidth=edge_width)
+            ax.add_patch(circle)
+            factor_nodes[factor_idx] = (factor_x, y_pos, size)  # Store at original index
+            
+            # Factor labels - emphasize H2S factor
+            font_size = 13 if is_h2s else 12
+            ax.text(factor_x - 0.08, y_pos, f'Factor {factor_idx+1}', ha='right', va='center', 
+                   fontsize=font_size, fontweight='bold', color=color)
         
         # Draw species nodes (right side)
         species_nodes = []
@@ -8045,12 +8312,13 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
             ax.text(species_x + 0.08, y_pos, display_name, ha='left', va='center', 
                    fontsize=10, fontweight='bold', color='navy')
         
-        # Draw flow streams (the key Sankey-like feature)
+        # Draw flow streams (the key Sankey-like feature) - use plotting order for layering
         min_flow_threshold = 0.02 * max_flow  # Only show flows > 2% of maximum
         
-        for factor_idx in range(self.factors):
+        for factor_idx in factor_plot_order:
             factor_x_pos, factor_y_pos, factor_size = factor_nodes[factor_idx]
             factor_color = factor_colors[factor_idx]
+            is_h2s = self.color_manager.is_h2s_factor(factor_idx)
             
             for species_idx in range(len(self.species_names)):
                 flow_value = factor_species_flows[factor_idx, species_idx]
@@ -8058,8 +8326,9 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
                 if flow_value > min_flow_threshold:
                     species_x_pos, species_y_pos, species_size = species_nodes[species_idx]
                     
-                    # Calculate flow width (Sankey characteristic)
-                    flow_width = (flow_value / max_flow) * 30 + 2
+                    # Calculate flow width (Sankey characteristic) - enhance H2S flows
+                    base_width = (flow_value / max_flow) * 30 + 2
+                    flow_width = base_width * 1.2 if is_h2s else base_width
                     
                     # Create smooth curved flow path
                     # Start from edge of factor node
