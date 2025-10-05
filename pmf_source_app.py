@@ -28,6 +28,8 @@ from datetime import datetime, timedelta
 import warnings
 warnings.filterwarnings('ignore')
 import subprocess
+import json
+import multiprocessing as mp
 
 # PDF conversion imports
 try:
@@ -85,6 +87,16 @@ try:
             print("[WARNING] Using SA model (BatchSA requires esat_rust)")
         else:
             raise e
+    
+    # Import bootstrap error estimation
+    try:
+        from esat.error.bootstrap import Bootstrap
+        from esat.data.datahandler import DataHandler
+        HAS_BOOTSTRAP = True
+        print("[OK] ESAT Bootstrap imported successfully")
+    except ImportError as e:
+        HAS_BOOTSTRAP = False
+        print(f"[WARNING] ESAT Bootstrap not available: {e}")
 except ImportError:
     print("[ERROR] ESAT library not found. Please install it using:")
     print("   $env:CARGO_BUILD_TARGET = \"x86_64-pc-windows-msvc\"")
@@ -251,7 +263,11 @@ class MMFPMFAnalyzer:
                  method="ls-nmf", init_method="column_mean", init_norm=True, hold_h=False, delay_h=-1, 
                  species_weight=None, exclude_species=None, weight_aware_init=None,
                  reg_species=None, reg_lambda=None, reg_template=None, reg_template_files=None,
-                 reg_bursts=5, reg_iter_per_burst=50, reg_tol=1e-4, reg_elastic_l1=0.0):
+                 reg_bursts=5, reg_iter_per_burst=50, reg_tol=1e-4, reg_elastic_l1=0.0,
+                 # Bootstrap error estimation parameters
+                 bootstrap=False, bootstrap_n=100, bootstrap_block_size=None, bootstrap_threshold=0.6,
+                 bootstrap_parallel=True, bootstrap_cpus=None, bootstrap_seed=None, bootstrap_keep_h=True,
+                 bootstrap_reuse_seed=True, bootstrap_overlapping=False):
         """
         Initialize PMF analyzer for MMF data.
         
@@ -300,6 +316,18 @@ class MMFPMFAnalyzer:
             reg_iter_per_burst (int): Max iterations per training burst
             reg_tol (float): Early stop tolerance for relative change in regulated columns
             reg_elastic_l1 (float): Elastic-net L1 penalty on deviation from h0
+            
+            # Bootstrap error estimation parameters
+            bootstrap (bool): Enable bootstrap error estimation after PMF analysis
+            bootstrap_n (int): Number of bootstrap samples to run (default: 100)
+            bootstrap_block_size (int): Block size for temporal bootstrap resampling (None = auto-estimate)
+            bootstrap_threshold (float): Factor mapping threshold for bootstrap correlation (default: 0.6)
+            bootstrap_parallel (bool): Enable parallel processing for bootstrap (default: True)
+            bootstrap_cpus (int): Number of CPUs for bootstrap parallel processing (None = use all)
+            bootstrap_seed (int): Random seed for bootstrap resampling (None = use main seed)
+            bootstrap_keep_h (bool): Keep factor profiles (H matrix) from bootstrap samples (default: True)
+            bootstrap_reuse_seed (bool): Reuse seed across bootstrap samples for deterministic resampling
+            bootstrap_overlapping (bool): Allow overlapping blocks in bootstrap resampling (default: True)
         """
         self.station = station
         self.data_dir = data_dir
@@ -429,6 +457,27 @@ class MMFPMFAnalyzer:
         # Regularization plan will be computed in _prepare_regularization()
         self._reg_plan = []
         self._reg_enabled = bool(self.reg_species_raw)
+        
+        # Bootstrap error estimation parameters
+        self.bootstrap = bool(bootstrap)
+        self.bootstrap_n = int(bootstrap_n) if bootstrap_n > 0 else 100
+        self.bootstrap_block_size = int(bootstrap_block_size) if bootstrap_block_size is not None and bootstrap_block_size > 0 else None
+        self.bootstrap_threshold = float(bootstrap_threshold) if 0 < bootstrap_threshold <= 1 else 0.6
+        self.bootstrap_parallel = bool(bootstrap_parallel)
+        # Default to CPU-1 for performance (leave one CPU free)
+        if bootstrap_cpus is None and bootstrap_parallel:
+            import multiprocessing as mp
+            total_cpus = mp.cpu_count()
+            self.bootstrap_cpus = max(1, total_cpus - 1)  # Use CPU-1, minimum 1
+        else:
+            self.bootstrap_cpus = int(bootstrap_cpus) if bootstrap_cpus is not None and bootstrap_cpus > 0 else None
+        self.bootstrap_seed = int(bootstrap_seed) if bootstrap_seed is not None else None
+        self.bootstrap_keep_h = bool(bootstrap_keep_h)
+        self.bootstrap_reuse_seed = bool(bootstrap_reuse_seed)  # Default: True for stability
+        self.bootstrap_overlapping = bool(bootstrap_overlapping)  # Default: False per ESAT recommendations
+        
+        # Bootstrap results storage
+        self.bootstrap_results = None
     
     def _parse_species_weights(self, species_weight_list):
         """Parse species weight specifications into a dictionary.
@@ -1258,7 +1307,7 @@ class MMFPMFAnalyzer:
             # Legacy mode: station-based loading
             print(f"[SEARCH] Loading MMF data for {self.station}...")
             try:
-                parquet_file = get_mmf_parquet_file(self.station)
+                parquet_file = get_mmf_parquet_file(self.station, use_test_data=True)
             except Exception as e:
                 raise RuntimeError(f"Error determining file path for {self.station}: {e}")
             
@@ -3562,6 +3611,18 @@ class MMFPMFAnalyzer:
             'reg_iter_per_burst': getattr(self, 'reg_iter_per_burst', 50),
             'reg_tol': getattr(self, 'reg_tol', 1e-4),
             'reg_elastic_l1': getattr(self, 'reg_elastic_l1', 0.0),
+            
+            # Bootstrap error estimation parameters
+            'bootstrap': getattr(self, 'bootstrap', False),
+            'bootstrap_n': getattr(self, 'bootstrap_n', 100),
+            'bootstrap_block_size': getattr(self, 'bootstrap_block_size', None),
+            'bootstrap_threshold': getattr(self, 'bootstrap_threshold', 0.6),
+            'bootstrap_parallel': getattr(self, 'bootstrap_parallel', True),
+            'bootstrap_cpus': getattr(self, 'bootstrap_cpus', None),
+            'bootstrap_seed': getattr(self, 'bootstrap_seed', None),
+            'bootstrap_keep_h': getattr(self, 'bootstrap_keep_h', True),
+            'bootstrap_reuse_seed': getattr(self, 'bootstrap_reuse_seed', True),
+            'bootstrap_overlapping': getattr(self, 'bootstrap_overlapping', False),
         }
         
         html_section = """
@@ -3641,6 +3702,28 @@ class MMFPMFAnalyzer:
                 cmd_parts.append(f'--reg-species {reg_item["species"]}')
                 cmd_parts.append(f'--reg-lambda {reg_item["lambda"]}')
                 cmd_parts.append(f'--reg-template {reg_item["template_type"]}')
+        
+        # Add bootstrap parameters
+        if cli_params['bootstrap']:
+            cmd_parts.append('--bootstrap')
+            if cli_params['bootstrap_n'] != 100:
+                cmd_parts.append(f"--bootstrap-n {cli_params['bootstrap_n']}")
+            if cli_params['bootstrap_block_size'] is not None:
+                cmd_parts.append(f"--bootstrap-block-size {cli_params['bootstrap_block_size']}")
+            if cli_params['bootstrap_threshold'] != 0.6:
+                cmd_parts.append(f"--bootstrap-threshold {cli_params['bootstrap_threshold']}")
+            if not cli_params['bootstrap_parallel']:
+                cmd_parts.append('--bootstrap-parallel false')
+            if cli_params['bootstrap_cpus'] is not None:
+                cmd_parts.append(f"--bootstrap-cpus {cli_params['bootstrap_cpus']}")
+            if cli_params['bootstrap_seed'] is not None:
+                cmd_parts.append(f"--bootstrap-seed {cli_params['bootstrap_seed']}")
+            if not cli_params['bootstrap_keep_h']:
+                cmd_parts.append('--no-bootstrap-keep-h')
+            if not cli_params['bootstrap_reuse_seed']:
+                cmd_parts.append('--no-bootstrap-reuse-seed')
+            if cli_params['bootstrap_overlapping']:
+                cmd_parts.append('--bootstrap-overlapping')
         
         # Add help detail flag if enabled  
         if cli_params['help_detail']:
@@ -3750,6 +3833,18 @@ class MMFPMFAnalyzer:
             'reg_iter_per_burst': (cli_params.get('reg_iter_per_burst', 50), 'Max iterations per burst'),
             'reg_tol': (cli_params.get('reg_tol', 1e-4), 'Early stop tolerance'),
             'reg_elastic_l1': (cli_params.get('reg_elastic_l1', 0.0), 'Elastic-net L1 penalty'),
+            
+            # Bootstrap error estimation parameters
+            'bootstrap': (cli_params.get('bootstrap', False), 'Enable bootstrap error estimation after PMF analysis'),
+            'bootstrap_n': (cli_params.get('bootstrap_n', 100), 'Number of bootstrap samples to run'),
+            'bootstrap_block_size': (cli_params.get('bootstrap_block_size') or 'Auto-estimated', 'Block size for temporal bootstrap resampling'),
+            'bootstrap_threshold': (cli_params.get('bootstrap_threshold', 0.6), 'Factor mapping threshold for bootstrap correlation'),
+            'bootstrap_parallel': (cli_params.get('bootstrap_parallel', True), 'Enable parallel processing for bootstrap'),
+            'bootstrap_cpus': (cli_params.get('bootstrap_cpus') or 'All available', 'Number of CPUs for bootstrap parallel processing'),
+            'bootstrap_seed': (cli_params.get('bootstrap_seed') or 'Main seed', 'Random seed for bootstrap resampling'),
+            'bootstrap_keep_h': (cli_params.get('bootstrap_keep_h', True), 'Keep factor profiles (H matrix) from bootstrap samples'),
+            'bootstrap_reuse_seed': (cli_params.get('bootstrap_reuse_seed', True), 'Reuse seed across bootstrap samples'),
+            'bootstrap_overlapping': (cli_params.get('bootstrap_overlapping', False), 'Allow overlapping blocks in bootstrap resampling'),
         }
         
         # Add species weighting if any applied
@@ -4113,6 +4208,61 @@ class MMFPMFAnalyzer:
                 <img src="dashboard/{plot_file.name}" alt="{plot_name}">
             </div>
             """
+        
+        # Add bootstrap uncertainty plots if available
+        if self.bootstrap and self.bootstrap_results:
+            print("   [BOOTSTRAP] Adding bootstrap uncertainty plots to dashboard...")
+            bootstrap_plots = self.create_bootstrap_dashboard()
+            
+            if bootstrap_plots:
+                html_content += """
+            <h2 class="section-header">Bootstrap Error Estimation</h2>
+            <p>Bootstrap error estimation provides uncertainty quantification for PMF factors using resampling methods.</p>
+            
+            <style>
+                .bootstrap-grid {
+                    display: grid;
+                    grid-template-columns: repeat(2, 1fr);
+                    grid-gap: 15px;
+                    width: 100%;
+                }
+                .bootstrap-grid .plot-panel {
+                    background-color: #f8f9fa;
+                    border: 1px solid #dee2e6;
+                    border-radius: 4px;
+                    padding: 10px;
+                }
+                .bootstrap-grid h3 {
+                    font-size: 14px;
+                    margin-top: 5px;
+                    margin-bottom: 8px;
+                }
+                .bootstrap-grid img {
+                    max-width: 100%;
+                    height: auto;
+                    display: block;
+                    margin: 0 auto;
+                }
+            </style>
+            
+            <div class="bootstrap-grid">
+            """
+                
+                for plot_file in bootstrap_plots:
+                    if plot_file.suffix.lower() in image_extensions:
+                        plot_name = plot_file.stem.replace('_', ' ').title()
+                        # Adjust path for bootstrap plots
+                        plot_rel_path = f"bootstrap_plots/{plot_file.name}"
+                        html_content += f"""
+                <div class="plot-panel">
+                    <h3>{plot_name}</h3>
+                    <img src="{plot_rel_path}" alt="{plot_name}">
+                </div>
+                """
+                
+                html_content += "</div>"  # Close bootstrap grid
+                
+                print(f"   [OK] Added {len(bootstrap_plots)} bootstrap plots to dashboard")
         
         # Add CLI flags record at bottom
         html_content += self._get_cli_flags_html_section()
@@ -4991,6 +5141,801 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         
         rotated_loadings = loadings @ R
         return rotated_loadings, R
+    
+    def prepare_bootstrap_inputs(self):
+        """
+        Prepare inputs for bootstrap error estimation.
+        
+        Returns:
+            tuple: (best_sa, feature_labels, data_handler, block_size, seed)
+        """
+        if not HAS_BOOTSTRAP:
+            raise RuntimeError("Bootstrap functionality not available. Please check ESAT installation.")
+        
+        if self.best_model is None:
+            raise RuntimeError("No PMF model available. Run PMF analysis first.")
+        
+        print("[BOOTSTRAP] Preparing bootstrap inputs...")
+        
+        # Get best SA model
+        if hasattr(self.best_model, 'sa'):
+            best_sa = self.best_model.sa  # For BatchSA models
+        else:
+            best_sa = self.best_model  # For single SA models
+        
+        # Get feature labels (species names)
+        feature_labels = list(self.concentration_data.columns)
+        print(f"   Feature labels: {feature_labels}")
+        
+        # Create DataHandler for optimal block size estimation
+        print("   Creating DataHandler for block size estimation...")
+        try:
+            # Create DataFrames with proper index for DataHandler
+            concentration_df = pd.DataFrame(self.concentration_data.values, 
+                                          columns=feature_labels, 
+                                          index=self.concentration_data.index)
+            uncertainty_df = pd.DataFrame(self.uncertainty_data.values, 
+                                        columns=feature_labels, 
+                                        index=self.uncertainty_data.index)
+            
+            # Use DataHandler.load_dataframe for proper initialization
+            data_handler = DataHandler.load_dataframe(concentration_df, uncertainty_df)
+        except Exception as e:
+            print(f"   [WARN] DataHandler creation failed: {e}")
+            data_handler = None
+        
+        # Estimate optimal block size if not specified
+        if self.bootstrap_block_size is None:
+            print("   Estimating optimal block size using DataHandler...")
+            try:
+                if data_handler and hasattr(data_handler, 'optimal_block'):
+                    optimal_block_size = data_handler.optimal_block
+                else:
+                    raise RuntimeError("DataHandler optimal_block not available")
+                print(f"   Estimated optimal block size: {optimal_block_size}")
+                
+                # Sanity check and warnings for block size
+                n_samples = self.concentration_data.shape[0]
+                if optimal_block_size >= n_samples / 10:
+                    print(f"   [WARN] Large block size ({optimal_block_size}) relative to dataset ({n_samples} samples)")
+                    print(f"   [WARN] This may reduce bootstrap effectiveness. Consider more data or smaller block size.")
+                elif optimal_block_size < 3:
+                    print(f"   [WARN] Very small block size ({optimal_block_size}). May indicate insufficient temporal correlation.")
+                    print(f"   [WARN] Consider using block_size=5-10 manually if results seem unstable.")
+                
+            except Exception as e:
+                print(f"   [ERROR] Block size estimation failed: {e}")
+                optimal_block_size = min(10, max(3, len(self.concentration_data) // 20))  # Adaptive fallback
+                print(f"   [FALLBACK] Using adaptive default block size: {optimal_block_size}")
+        else:
+            optimal_block_size = self.bootstrap_block_size
+            print(f"   Using user-specified block size: {optimal_block_size}")
+            
+            # Validate user-specified block size
+            n_samples = self.concentration_data.shape[0]
+            if optimal_block_size >= n_samples / 5:
+                print(f"   [WARN] User block size ({optimal_block_size}) is very large for dataset ({n_samples} samples)")
+        
+        # Determine seed for bootstrap
+        bootstrap_seed = self.bootstrap_seed if self.bootstrap_seed is not None else self.seed
+        print(f"   Bootstrap seed: {bootstrap_seed}")
+        
+        # Store actual values for later reference
+        self._actual_bootstrap_block_size = optimal_block_size
+        self._actual_bootstrap_seed = bootstrap_seed
+        
+        return best_sa, feature_labels, data_handler, optimal_block_size, bootstrap_seed
+    
+    def run_bootstrap_analysis(self):
+        """
+        Run bootstrap error estimation on the best PMF model.
+        
+        Returns:
+            dict: Bootstrap results containing paths to output files
+        """
+        if not self.bootstrap:
+            print("[BOOTSTRAP] Bootstrap disabled, skipping...")
+            return None
+        
+        if not HAS_BOOTSTRAP:
+            print("[ERROR] Bootstrap functionality not available. Please check ESAT installation.")
+            return None
+        
+        print(f"[BOOTSTRAP] Starting bootstrap error estimation with {self.bootstrap_n} samples...")
+        
+        try:
+            # Prepare bootstrap inputs
+            best_sa, feature_labels, data_handler, block_size, seed = self.prepare_bootstrap_inputs()
+            
+            # Create Bootstrap instance
+            print("   Creating Bootstrap instance...")
+            bootstrap = Bootstrap(
+                sa=best_sa,
+                feature_labels=feature_labels,
+                model_selected=0,  # Use the best model
+                bootstrap_n=self.bootstrap_n,
+                block_size=block_size,
+                threshold=self.bootstrap_threshold,
+                parallel=self.bootstrap_parallel,
+                cpus=self.bootstrap_cpus,
+                seed=seed
+            )
+            
+            print(f"   Bootstrap configuration:")
+            print(f"     Samples: {self.bootstrap_n}")
+            print(f"     Block size: {block_size}")
+            print(f"     Threshold: {self.bootstrap_threshold}")
+            print(f"     Parallel: {self.bootstrap_parallel}")
+            print(f"     CPUs: {self.bootstrap_cpus or 'all available'}")
+            print(f"     Seed: {seed}")
+            
+            # Provide runtime guidance
+            if self.bootstrap_n >= 200:
+                print(f"   [INFO] Large bootstrap sample size ({self.bootstrap_n}) - expect longer runtime")
+                print(f"   [INFO] Consider starting with --bootstrap-n 20 for testing, then scale up")
+            if self.bootstrap_parallel and self.bootstrap_cpus and self.bootstrap_cpus >= mp.cpu_count():
+                print(f"   [WARN] Using all CPUs may impact system responsiveness during bootstrap")
+            
+            # Run bootstrap analysis
+            print("   Running bootstrap analysis...")
+            bootstrap.run(
+                keep_H=self.bootstrap_keep_h,
+                reuse_seed=self.bootstrap_reuse_seed,
+                block=True,  # Use block resampling
+                overlapping=self.bootstrap_overlapping
+            )
+            
+            print(f"[OK] Bootstrap analysis completed successfully")
+            
+            # Save bootstrap outputs
+            saved_results = self.save_bootstrap_outputs(bootstrap)
+            
+            # Store results
+            self.bootstrap_results = saved_results
+            
+            return saved_results
+            
+        except Exception as e:
+            print(f"[ERROR] Bootstrap analysis failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def save_bootstrap_outputs(self, bootstrap_obj):
+        """
+        Save ESAT Bootstrap object results to organized output structure.
+        
+        Args:
+            bootstrap_obj (Bootstrap): ESAT Bootstrap object with completed analysis
+            
+        Returns:
+            dict: Paths to saved bootstrap output files
+        """
+        print("[BOOTSTRAP] Saving bootstrap outputs...")
+        
+        # Create error estimation output directory
+        error_dir = self.output_dir / "error"
+        error_dir.mkdir(exist_ok=True, parents=True)
+        
+        saved_files = {}
+        
+        try:
+            # Save bootstrap object as pickle (full state) - use absolute path
+            bootstrap_name = f"bootstrap-{self.filename_prefix}"
+            error_dir_abs = error_dir.resolve()  # Convert to absolute path
+            
+            print(f"   Saving bootstrap files to: {error_dir_abs}")
+            
+            # Save bootstrap pickle - ESAT Bootstrap.save() often returns None but creates files successfully
+            expected_pickle = error_dir_abs / f"{bootstrap_name}.pkl"
+            pickle_path = bootstrap_obj.save(bootstrap_name, str(error_dir_abs), pickle_result=True)
+            
+            # Handle ESAT Bootstrap.save() return behavior (often returns None even when successful)
+            if expected_pickle.exists():
+                saved_files['pickle'] = expected_pickle
+                print(f"   Saved: {expected_pickle.name}")
+                if pickle_path is None:
+                    print(f"   [INFO] ESAT Bootstrap.save() returned None but file was created successfully")
+            else:
+                print(f"   [ERROR] Bootstrap pickle file not found: {expected_pickle}")
+                print(f"   [DEBUG] ESAT Bootstrap.save() returned: {pickle_path}")
+            
+            # Save as JSON/CSV artifacts for dashboard consumption 
+            json_path = bootstrap_obj.save(bootstrap_name, str(error_dir_abs), pickle_result=False)
+            if json_path:
+                # Bootstrap.save() returns directory path when pickle_result=False
+                saved_files['json_artifacts'] = Path(json_path)
+                print(f"   Saved: JSON/CSV artifacts to {Path(json_path).name}")
+            else:
+                print(f"   [WARN] Bootstrap JSON/CSV save returned None")
+            
+            # Create summary information file
+            summary_file = error_dir / f"{self.filename_prefix}_bootstrap_summary.json"
+            # Get actual parameters used (including computed block size)
+            actual_block_size = getattr(self, '_actual_bootstrap_block_size', self.bootstrap_block_size)
+            actual_seed = getattr(self, '_actual_bootstrap_seed', self.bootstrap_seed)
+            
+            summary_info = {
+                "bootstrap_parameters": {
+                    "n_samples": self.bootstrap_n,
+                    "block_size": actual_block_size,  # Use actual computed value
+                    "threshold": self.bootstrap_threshold,
+                    "parallel": self.bootstrap_parallel,
+                    "cpus": self.bootstrap_cpus,
+                    "seed": actual_seed,  # Use actual seed value
+                    "keep_h": self.bootstrap_keep_h,
+                    "reuse_seed": self.bootstrap_reuse_seed,
+                    "overlapping": self.bootstrap_overlapping
+                },
+                "base_model": {
+                    "factors": self.factors,
+                    "models": self.models,
+                    "species": list(self.concentration_data.columns),
+                    "n_samples": len(self.concentration_data),
+                    "date_range": f"{self.start_date} to {self.end_date}"
+                },
+                "output_files": {k: str(v) for k, v in saved_files.items()},
+                "created": datetime.now().isoformat()
+            }
+            
+            with open(summary_file, 'w') as f:
+                json.dump(summary_info, f, indent=2)
+            
+            saved_files['summary'] = summary_file
+            print(f"   Saved: {summary_file.name}")
+            
+            print(f"[OK] Bootstrap outputs saved to: {error_dir}")
+            return saved_files
+            
+        except Exception as e:
+            print(f"[ERROR] Failed to save bootstrap outputs: {e}")
+            return {}
+    
+    def create_bootstrap_dashboard(self):
+        """
+        Create bootstrap error estimation dashboard with uncertainty visualizations.
+        
+        Returns:
+            list: Paths to created bootstrap plot files
+        """
+        if not self.bootstrap or self.bootstrap_results is None:
+            print("[BOOTSTRAP] No bootstrap results available for dashboard creation")
+            return []
+        
+        print("[DASHBOARD] Creating bootstrap uncertainty dashboard...")
+        
+        # Create bootstrap plots directory
+        bootstrap_dir = self.output_dir / "bootstrap_plots"
+        bootstrap_dir.mkdir(exist_ok=True, parents=True)
+        
+        plot_files = []
+        
+        try:
+            # Load bootstrap object from pickle for full access to results
+            if 'pickle' in self.bootstrap_results and self.bootstrap_results['pickle']:
+                pickle_path = Path(self.bootstrap_results['pickle']).resolve()  # Ensure absolute path
+                print(f"   Loading bootstrap object from: {pickle_path}")
+                
+                # Import Bootstrap class for loading
+                from esat.error.bootstrap import Bootstrap
+                bootstrap_obj = Bootstrap.load(str(pickle_path))
+                
+                if bootstrap_obj is None:
+                    print("   [ERROR] Failed to load bootstrap pickle file")
+                    # Try alternative approach using summary data
+                    return self._create_bootstrap_plots_from_summary(bootstrap_dir)
+                
+                print(f"   [OK] Bootstrap object loaded successfully")
+                
+                # Create factor variability plots (per-factor profile uncertainty)
+                for factor_idx in range(self.factors):
+                    factor_plot = self._create_factor_variability_plot(bootstrap_obj, bootstrap_dir, factor_idx)
+                    if factor_plot:
+                        plot_files.append(factor_plot)
+                
+                # Create species uncertainty plot (across all factors)
+                species_plot = self._create_species_uncertainty_plot(bootstrap_obj, bootstrap_dir)
+                if species_plot:
+                    plot_files.append(species_plot)
+                
+                # Create contribution uncertainty plot (time series of factor contributions)
+                contrib_plot = self._create_contribution_uncertainty_plot(bootstrap_obj, bootstrap_dir)
+                if contrib_plot:
+                    plot_files.append(contrib_plot)
+                
+                # Create bootstrap summary statistics plot
+                summary_plot = self._create_bootstrap_summary_plot(bootstrap_obj, bootstrap_dir)
+                if summary_plot:
+                    plot_files.append(summary_plot)
+            else:
+                print("   [WARN] No bootstrap pickle file available, creating summary plots instead")
+                return self._create_bootstrap_plots_from_summary(bootstrap_dir)
+            
+            print(f"[OK] Created {len(plot_files)} bootstrap dashboard plots")
+            return plot_files
+            
+        except Exception as e:
+            print(f"[ERROR] Failed to create bootstrap dashboard: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
+    
+    def _create_bootstrap_plots_from_summary(self, bootstrap_dir):
+        """
+        Create basic bootstrap plots from summary information when pickle loading fails.
+        
+        Args:
+            bootstrap_dir (Path): Output directory for plots
+            
+        Returns:
+            list: Paths to created plot files
+        """
+        print("   [FALLBACK] Creating basic bootstrap summary plots...")
+        
+        plot_files = []
+        
+        try:
+            import matplotlib.pyplot as plt
+            import numpy as np
+            
+            # Set larger font sizes for bootstrap plots
+            plt.rcParams.update({
+                'font.size': 14,
+                'axes.titlesize': 16,
+                'axes.labelsize': 14,
+                'xtick.labelsize': 12,
+                'ytick.labelsize': 12,
+                'legend.fontsize': 12
+            })
+            
+            # Create a basic bootstrap summary plot
+            fig, ax = plt.subplots(figsize=(10, 6))
+            
+            # Get bootstrap parameters from summary
+            if 'summary' in self.bootstrap_results:
+                summary_file = self.bootstrap_results['summary']
+                with open(summary_file, 'r') as f:
+                    import json
+                    summary = json.load(f)
+                
+                bs_params = summary.get('bootstrap_parameters', {})
+                base_model = summary.get('base_model', {})
+                
+                # Create text summary plot
+                ax.text(0.5, 0.8, 'Bootstrap Error Estimation Completed', 
+                       ha='center', va='center', fontsize=20, fontweight='bold')
+                
+                info_text = f"""Bootstrap Configuration:
+• Samples: {bs_params.get('n_samples', 'N/A')}
+• Block Size: {bs_params.get('block_size', 'N/A')}
+• Threshold: {bs_params.get('threshold', 'N/A')}
+• Parallel: {bs_params.get('parallel', 'N/A')}
+• CPUs: {bs_params.get('cpus', 'N/A')}
+• Seed: {bs_params.get('seed', 'N/A')}
+
+Base Model:
+• Factors: {base_model.get('factors', 'N/A')}
+• Species: {len(base_model.get('species', []))}
+• Samples: {base_model.get('n_samples', 'N/A')}
+• Date Range: {base_model.get('date_range', 'N/A')}
+
+Note: Bootstrap uncertainty plots require pickle files.
+Bootstrap analysis completed successfully but
+visualization data is not available."""
+                
+                ax.text(0.5, 0.4, info_text, ha='center', va='center', 
+                       fontsize=14, bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8))
+                
+                ax.set_xlim(0, 1)
+                ax.set_ylim(0, 1)
+                ax.set_title('Bootstrap Error Estimation Summary', fontsize=18, fontweight='bold')
+                ax.axis('off')
+                
+                plt.tight_layout()
+                plot_path = bootstrap_dir / f"{self.filename_prefix}_bootstrap_summary.png"
+                plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
+                plt.close()
+                
+                plot_files.append(plot_path)
+                print(f"   [OK] Created bootstrap summary plot: {plot_path.name}")
+            
+            return plot_files
+            
+        except Exception as e:
+            print(f"   [ERROR] Failed to create fallback bootstrap plots: {e}")
+            return []
+    
+    def _create_factor_variability_plot(self, bootstrap_obj, output_dir, factor_idx):
+        """
+        Create factor variability plot showing bootstrap uncertainty in factor profiles.
+        
+        Args:
+            bootstrap_obj (Bootstrap): ESAT Bootstrap object
+            output_dir (Path): Output directory for plots
+            factor_idx (int): Factor index to plot
+            
+        Returns:
+            Path: Path to created plot file
+        """
+        try:
+            import matplotlib.pyplot as plt
+            import numpy as np
+            
+            # Set larger font sizes for bootstrap plots
+            plt.rcParams.update({
+                'font.size': 14,
+                'axes.titlesize': 16,
+                'axes.labelsize': 14,
+                'xtick.labelsize': 12,
+                'ytick.labelsize': 12,
+                'legend.fontsize': 12
+            })
+            
+            # Get factor profile distributions from bootstrap
+            if not hasattr(bootstrap_obj, 'bs_profiles') or factor_idx not in bootstrap_obj.bs_profiles:
+                print(f"   [WARN] No bootstrap profiles available for factor {factor_idx}")
+                return None
+                
+            factor_profiles = np.array(bootstrap_obj.bs_profiles[factor_idx])
+            base_profile = bootstrap_obj.base_H[factor_idx] / np.sum(bootstrap_obj.base_H[factor_idx])  # Normalize
+            species_names = list(self.concentration_data.columns)
+            
+            # Create box plot showing profile uncertainty
+            fig, ax = plt.subplots(figsize=(12, 8))
+            
+            # Box plots for each species
+            box_data = [factor_profiles[:, i] * 100 for i in range(len(species_names))]
+            bp = ax.boxplot(box_data, positions=range(len(species_names)), patch_artist=True)
+            
+            # Color H2S factor red, others blue
+            if self.color_manager and self.color_manager.is_h2s_factor(factor_idx):
+                box_color = '#d62728'  # Red for H2S factor
+                factor_label = f"Factor {factor_idx + 1} (H2S-dominant)"
+            else:
+                box_color = '#1f77b4'  # Blue for other factors
+                factor_label = f"Factor {factor_idx + 1}"
+            
+            for patch in bp['boxes']:
+                patch.set_facecolor(box_color)
+                patch.set_alpha(0.6)
+            
+            # Overlay base model profile as red points
+            base_percentages = base_profile * 100
+            ax.scatter(range(len(species_names)), base_percentages, 
+                      color='red', s=40, zorder=5, label='Base Model')
+            
+            # Format plot
+            ax.set_xticks(range(len(species_names)))
+            ax.set_xticklabels(species_names, rotation=45, ha='right', fontsize=12)
+            ax.set_ylabel('Percentage of Species (%)', fontsize=14)
+            ax.set_title(f'{factor_label} - Profile Variability from Bootstrap Analysis', fontsize=16)
+            ax.grid(True, alpha=0.3)
+            ax.legend(fontsize=12)
+            
+            plt.tight_layout()
+            plot_path = output_dir / f"{self.filename_prefix}_bootstrap_factor_{factor_idx + 1}_profile.png"
+            plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
+            plt.close()
+            
+            return plot_path
+            
+        except Exception as e:
+            print(f"   Error creating factor variability plot for factor {factor_idx}: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def _create_species_uncertainty_plot(self, bootstrap_obj, output_dir):
+        """
+        Create species profile uncertainty plot across all factors.
+        
+        Args:
+            bootstrap_obj (Bootstrap): ESAT Bootstrap object
+            output_dir (Path): Output directory for plots
+            
+        Returns:
+            Path: Path to created plot file
+        """
+        try:
+            import matplotlib.pyplot as plt
+            import numpy as np
+            
+            # Set larger font sizes for bootstrap plots
+            plt.rcParams.update({
+                'font.size': 14,
+                'axes.titlesize': 16,
+                'axes.labelsize': 14,
+                'xtick.labelsize': 12,
+                'ytick.labelsize': 12,
+                'legend.fontsize': 12
+            })
+            
+            if not hasattr(bootstrap_obj, 'bs_profiles'):
+                print("   [WARN] No bootstrap profiles available for species uncertainty plot")
+                return None
+                
+            species_names = list(self.concentration_data.columns)
+            n_species = len(species_names)
+            n_factors = self.factors
+            
+            # Create subplot grid
+            fig, axes = plt.subplots(n_factors, 1, figsize=(14, 4 * n_factors), sharex=True)
+            if n_factors == 1:
+                axes = [axes]
+            
+            for factor_idx in range(n_factors):
+                ax = axes[factor_idx]
+                
+                if factor_idx in bootstrap_obj.bs_profiles:
+                    factor_profiles = np.array(bootstrap_obj.bs_profiles[factor_idx])
+                    base_profile = bootstrap_obj.base_H[factor_idx] / np.sum(bootstrap_obj.base_H[factor_idx])
+                    
+                    # Calculate percentiles for uncertainty bands
+                    p5 = np.percentile(factor_profiles, 5, axis=0) * 100
+                    p25 = np.percentile(factor_profiles, 25, axis=0) * 100
+                    p75 = np.percentile(factor_profiles, 75, axis=0) * 100
+                    p95 = np.percentile(factor_profiles, 95, axis=0) * 100
+                    median = np.percentile(factor_profiles, 50, axis=0) * 100
+                    base_pct = base_profile * 100
+                    
+                    x = range(n_species)
+                    
+                    # Plot uncertainty bands
+                    ax.fill_between(x, p5, p95, alpha=0.2, color='lightgray', label='5-95% range')
+                    ax.fill_between(x, p25, p75, alpha=0.4, color='lightblue', label='25-75% range')
+                    
+                    # Plot median and base model
+                    ax.plot(x, median, 'b-', linewidth=2, label='Bootstrap Median')
+                    
+                    # Color H2S factor red, others blue
+                    if self.color_manager and self.color_manager.is_h2s_factor(factor_idx):
+                        base_color = '#d62728'  # Red for H2S factor
+                        factor_label = f"Factor {factor_idx + 1} (H2S-dominant)"
+                    else:
+                        base_color = '#1f77b4'  # Blue for other factors
+                        factor_label = f"Factor {factor_idx + 1}"
+                    
+                    ax.scatter(x, base_pct, color=base_color, s=40, zorder=5, label='Base Model')
+                    
+                    ax.set_ylabel('Percentage (%)', fontsize=14)
+                    ax.set_title(factor_label, fontsize=14)
+                    ax.grid(True, alpha=0.3)
+                    
+                    if factor_idx == 0:  # Only show legend on first subplot
+                        ax.legend(loc='upper right', fontsize=12)
+                
+            # Format x-axis for bottom subplot
+            axes[-1].set_xticks(range(n_species))
+            axes[-1].set_xticklabels(species_names, rotation=45, ha='right', fontsize=12)
+            axes[-1].set_xlabel('Species', fontsize=14)
+            
+            plt.suptitle('Species Profile Uncertainty from Bootstrap Analysis', fontsize=18)
+            plt.tight_layout()
+            
+            plot_path = output_dir / f"{self.filename_prefix}_bootstrap_species_uncertainty.png"
+            plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
+            plt.close()
+            
+            return plot_path
+            
+        except Exception as e:
+            print(f"   Error creating species uncertainty plot: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def _create_contribution_uncertainty_plot(self, bootstrap_obj, output_dir):
+        """
+        Create factor contribution uncertainty plot.
+        
+        Args:
+            bootstrap_obj (Bootstrap): ESAT Bootstrap object
+            output_dir (Path): Output directory for plots
+            
+        Returns:
+            Path: Path to created plot file
+        """
+        try:
+            import matplotlib.pyplot as plt
+            import numpy as np
+            
+            # Set larger font sizes for bootstrap plots
+            plt.rcParams.update({
+                'font.size': 14,
+                'axes.titlesize': 16,
+                'axes.labelsize': 14,
+                'xtick.labelsize': 12,
+                'ytick.labelsize': 12,
+                'legend.fontsize': 12
+            })
+            
+            if not hasattr(bootstrap_obj, 'bs_factor_contributions'):
+                print("   [WARN] No bootstrap factor contributions available")
+                return None
+                
+            species_names = list(self.concentration_data.columns)
+            n_species = len(species_names)
+            n_factors = self.factors
+            
+            # Create summary plot showing total contribution uncertainty per factor
+            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 10))
+            
+            # Plot 1: Total contribution variability by factor
+            factor_totals = []
+            factor_labels = []
+            factor_colors = []
+            
+            for factor_idx in range(n_factors):
+                if factor_idx in bootstrap_obj.bs_factor_contributions:
+                    contributions = np.array(bootstrap_obj.bs_factor_contributions[factor_idx])
+                    # Sum across all species for each bootstrap sample
+                    total_contributions = np.sum(contributions, axis=1)
+                    factor_totals.append(total_contributions)
+                    
+                    # Color H2S factor red, others blue
+                    if self.color_manager and self.color_manager.is_h2s_factor(factor_idx):
+                        factor_colors.append('#d62728')  # Red for H2S factor
+                        factor_labels.append(f"Factor {factor_idx + 1} (H2S)")
+                    else:
+                        factor_colors.append('#1f77b4')  # Blue for other factors
+                        factor_labels.append(f"Factor {factor_idx + 1}")
+            
+            if factor_totals:
+                # Box plot of total contributions
+                bp1 = ax1.boxplot(factor_totals, positions=range(len(factor_totals)), patch_artist=True)
+                
+                for patch, color in zip(bp1['boxes'], factor_colors):
+                    patch.set_facecolor(color)
+                    patch.set_alpha(0.6)
+                
+                ax1.set_xticks(range(len(factor_labels)))
+                ax1.set_xticklabels(factor_labels, rotation=0, fontsize=12)
+                ax1.set_ylabel('Total Contribution', fontsize=14)
+                ax1.set_title('Factor Contribution Uncertainty (Total across all species)', fontsize=14)
+                ax1.grid(True, alpha=0.3)
+            
+            # Plot 2: Species-wise contribution uncertainty for H2S factor (if available)
+            if self.color_manager and self.color_manager.h2s_factor_idx is not None:
+                h2s_idx = self.color_manager.h2s_factor_idx
+                if h2s_idx in bootstrap_obj.bs_factor_contributions:
+                    h2s_contributions = np.array(bootstrap_obj.bs_factor_contributions[h2s_idx])
+                    
+                    # Box plot for each species contribution
+                    species_box_data = [h2s_contributions[:, i] for i in range(n_species)]
+                    bp2 = ax2.boxplot(species_box_data, positions=range(n_species), patch_artist=True)
+                    
+                    for patch in bp2['boxes']:
+                        patch.set_facecolor('#d62728')  # Red for H2S factor
+                        patch.set_alpha(0.6)
+                    
+                    # Base model contributions for comparison
+                    base_h2s_contribs = np.sum(bootstrap_obj.base_W[:, h2s_idx].reshape(-1, 1) @ 
+                                              bootstrap_obj.base_H[h2s_idx].reshape(1, -1), axis=0)
+                    ax2.scatter(range(n_species), base_h2s_contribs, 
+                              color='red', s=40, zorder=5, label='Base Model')
+                    
+                    ax2.set_xticks(range(n_species))
+                    ax2.set_xticklabels(species_names, rotation=45, ha='right', fontsize=12)
+                    ax2.set_ylabel('Species Contribution', fontsize=14)
+                    ax2.set_title(f'Factor {h2s_idx + 1} (H2S-dominant) - Species-wise Contribution Uncertainty', fontsize=14)
+                    ax2.grid(True, alpha=0.3)
+                    ax2.legend(fontsize=12)
+            
+            plt.suptitle('Factor Contribution Uncertainty from Bootstrap Analysis', fontsize=16)
+            plt.tight_layout()
+            
+            plot_path = output_dir / f"{self.filename_prefix}_bootstrap_contribution_uncertainty.png"
+            plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
+            plt.close()
+            
+            return plot_path
+            
+        except Exception as e:
+            print(f"   Error creating contribution uncertainty plot: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def _create_bootstrap_summary_plot(self, bootstrap_obj, output_dir):
+        """
+        Create bootstrap summary statistics plot.
+        
+        Args:
+            bootstrap_obj (Bootstrap): ESAT Bootstrap object
+            output_dir (Path): Output directory for plots
+            
+        Returns:
+            Path: Path to created plot file
+        """
+        try:
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 8))
+            
+            # Left panel: Bootstrap parameters and summary
+            summary_text = f"""Bootstrap Error Estimation Summary
+            
+Bootstrap Parameters:
+• Samples: {self.bootstrap_n}
+• Block Size: {self.bootstrap_block_size or 'Auto-estimated'}
+• Threshold: {self.bootstrap_threshold}
+• Parallel: {self.bootstrap_parallel}
+• CPUs: {self.bootstrap_cpus or 'All available'}
+• Keep H: {self.bootstrap_keep_h}
+• Reuse Seed: {self.bootstrap_reuse_seed}
+
+Base Model:
+• Factors: {self.factors}
+• Models: {self.models}
+• Species: {len(self.concentration_data.columns)}
+• Samples: {len(self.concentration_data)}
+            """
+            
+            if hasattr(bootstrap_obj, 'q_results') and bootstrap_obj.q_results is not None:
+                q_stats = bootstrap_obj.q_results['Q(robust)']
+                summary_text += f"""
+
+Q(robust) Statistics:
+• Base Model: {bootstrap_obj.base_Q:.2f}
+• Bootstrap Mean: {q_stats.mean():.2f}
+• Bootstrap Std: {q_stats.std():.2f}
+• Bootstrap Range: {q_stats.min():.2f} - {q_stats.max():.2f}
+                """
+            
+            ax1.text(0.05, 0.95, summary_text, transform=ax1.transAxes, 
+                   fontsize=13, verticalalignment='top',
+                   bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.8))
+            
+            ax1.set_xlim(0, 1)
+            ax1.set_ylim(0, 1)
+            ax1.axis('off')
+            ax1.set_title('Bootstrap Configuration & Statistics', fontsize=16, pad=20)
+            
+            # Right panel: Factor mapping table visualization
+            if hasattr(bootstrap_obj, 'mapping_df') and bootstrap_obj.mapping_df is not None:
+                mapping_data = bootstrap_obj.mapping_df.copy()
+                
+                # Remove the 'Boot Factors' column for plotting (it's just row labels)
+                if 'Boot Factors' in mapping_data.columns:
+                    mapping_data = mapping_data.drop('Boot Factors', axis=1)
+                
+                # Create heatmap of mapping counts
+                import seaborn as sns
+                sns.heatmap(mapping_data.values, 
+                           xticklabels=mapping_data.columns, 
+                           yticklabels=[f'Boot F{i+1}' for i in range(len(mapping_data))],
+                           annot=True, fmt='.1f', cmap='Blues', ax=ax2,
+                           annot_kws={'fontsize': 12},
+                           cbar_kws={'label': 'Bootstrap Mapping Count'})
+                
+                ax2.set_title('Factor Mapping: Bootstrap → Base Factors', fontsize=16, pad=20)
+                ax2.set_xlabel('Base Model Factors', fontsize=14)
+                ax2.set_ylabel('Bootstrap Factors', fontsize=14)
+                ax2.tick_params(axis='both', which='major', labelsize=12)
+                
+                # Add interpretation text
+                interpretation = "Higher counts indicate more consistent\nfactor identification across bootstrap samples"
+                ax2.text(0.02, 0.98, interpretation, transform=ax2.transAxes, 
+                        fontsize=11, verticalalignment='top',
+                        bbox=dict(boxstyle='round', facecolor='lightcyan', alpha=0.7))
+            else:
+                ax2.text(0.5, 0.5, 'Factor mapping data not available', 
+                        ha='center', va='center', transform=ax2.transAxes, fontsize=12)
+                ax2.set_title('Factor Mapping Unavailable', fontsize=14)
+                ax2.axis('off')
+            
+            plt.suptitle('Bootstrap Error Estimation Summary', fontsize=18, y=0.95)
+            plt.tight_layout()
+            
+            plot_path = output_dir / f"{self.filename_prefix}_bootstrap_summary.png"
+            plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
+            plt.close()
+            
+            return plot_path
+            
+        except Exception as e:
+            print(f"   Error creating bootstrap summary plot: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
     
     def run_pca_analysis(self):
         """
@@ -8782,6 +9727,28 @@ def main():
     parser.add_argument('--reg-elastic-l1', type=float, default=0.0,
                        help='Elastic-net L1 penalty on deviation from h0 (default: 0.0, disabled)')
     
+    # Bootstrap error estimation options
+    parser.add_argument('--bootstrap', action='store_true', default=False,
+                       help='Run bootstrap error estimation after PMF analysis (default: disabled)')
+    parser.add_argument('--bootstrap-n', type=int, default=100,
+                       help='Number of bootstrap samples to run (default: 100)')
+    parser.add_argument('--bootstrap-block-size', type=int, default=None,
+                       help='Block size for temporal bootstrap resampling. If None, auto-estimated using optimal_block_length (default: None)')
+    parser.add_argument('--bootstrap-threshold', type=float, default=0.6,
+                       help='Factor mapping threshold for bootstrap correlation (default: 0.6)')
+    parser.add_argument('--bootstrap-parallel', action='store_true', default=True,
+                       help='Enable parallel processing for bootstrap (default: enabled)')
+    parser.add_argument('--bootstrap-cpus', type=int, default=None,
+                       help='Number of CPUs for bootstrap parallel processing. If None, uses all available (default: None)')
+    parser.add_argument('--bootstrap-seed', type=int, default=None,
+                       help='Random seed for bootstrap resampling. If None, uses main --seed value (default: None)')
+    parser.add_argument('--bootstrap-keep-h', action='store_true', default=True,
+                       help='Keep factor profiles (H matrix) from bootstrap samples (default: enabled)')
+    parser.add_argument('--bootstrap-reuse-seed', action='store_true', default=True,
+                       help='Reuse seed across bootstrap samples for deterministic resampling (default: enabled)')
+    parser.add_argument('--bootstrap-overlapping', action='store_true', default=False,
+                       help='Allow overlapping blocks in bootstrap resampling (default: disabled)')
+    
     args = parser.parse_args()
     
     # Handle detailed help request
@@ -8857,7 +9824,18 @@ def main():
             reg_bursts=args.reg_bursts,
             reg_iter_per_burst=args.reg_iter_per_burst,
             reg_tol=args.reg_tol,
-            reg_elastic_l1=args.reg_elastic_l1
+            reg_elastic_l1=args.reg_elastic_l1,
+            # Bootstrap error estimation parameters
+            bootstrap=args.bootstrap,
+            bootstrap_n=args.bootstrap_n,
+            bootstrap_block_size=args.bootstrap_block_size,
+            bootstrap_threshold=args.bootstrap_threshold,
+            bootstrap_parallel=args.bootstrap_parallel,
+            bootstrap_cpus=args.bootstrap_cpus,
+            bootstrap_seed=args.bootstrap_seed,
+            bootstrap_keep_h=args.bootstrap_keep_h,
+            bootstrap_reuse_seed=args.bootstrap_reuse_seed,
+            bootstrap_overlapping=args.bootstrap_overlapping
         )
         
         # Override default parameters if specified
@@ -8894,6 +9872,21 @@ def main():
         pmf.prepare_pmf_data()
         
         if pmf.run_pmf_analysis():
+            # Run bootstrap error estimation if requested
+            if args.bootstrap:
+                print(f"\n[BOOTSTRAP] Bootstrap parameters: n={args.bootstrap_n}, parallel={args.bootstrap_parallel}")
+                if pmf.bootstrap_seed:
+                    print(f"   Using bootstrap seed: {pmf.bootstrap_seed}")
+                else:
+                    print(f"   Using main seed for bootstrap: {pmf.seed}")
+                
+                bootstrap_results = pmf.run_bootstrap_analysis()
+                if bootstrap_results:
+                    print(f"[OK] Bootstrap error estimation completed")
+                    print(f"[DATA] Bootstrap results saved in: {pmf.output_dir / 'error'}")
+                else:
+                    print(f"[WARN] Bootstrap analysis failed, continuing without error estimation")
+            
             # Run PCA analysis if requested
             if args.run_pca:
                 print("\n[PCA] Running PCA analysis for comparison...")
