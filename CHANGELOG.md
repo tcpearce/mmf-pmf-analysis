@@ -2562,4 +2562,4 @@ python pmf_source_app.py MMF9 --start-date 2023-10-01 --end-date 2023-10-30 --fa
 
 **Impact**: Complete visual consistency achieved - H2S-dominant factor now prominently displayed in red across every single PMF dashboard visualization, including all Sankey diagram variants.
 
-**Git Commit**: [Insert commit hash after GitHub update]
+**Git Commit**: [7845cf4](https://github.com/tcpearce/mmf-pmf-analysis/commit/7845cf4)
