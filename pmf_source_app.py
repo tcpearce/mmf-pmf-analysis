@@ -3621,7 +3621,14 @@ class MMFPMFAnalyzer:
         elif 'H2S' in self.df.columns:
             # H2S was excluded from PMF but exists in original data
             try:
-                df_indexed = self.df.set_index('datetime')
+                # Handle both datetime column and index cases
+                if 'datetime' in self.df.columns:
+                    df_indexed = self.df.set_index('datetime')
+                elif hasattr(self.df.index, 'min') and pd.api.types.is_datetime64_any_dtype(self.df.index):
+                    df_indexed = self.df  # Already has datetime index
+                else:
+                    raise ValueError("No datetime information available")
+                
                 h2s_original = df_indexed['H2S'].reindex(datetime_index, method='nearest', tolerance=pd.Timedelta('1H'))
                 if h2s_original.notna().sum() > len(h2s_original) * 0.5:  # At least 50% data available
                     extended_conc_data['H2S'] = h2s_original
@@ -3636,7 +3643,14 @@ class MMFPMFAnalyzer:
         elif 'CH4' in self.df.columns:
             # CH4 was excluded from PMF but exists in original data
             try:
-                df_indexed = self.df.set_index('datetime')
+                # Handle both datetime column and index cases
+                if 'datetime' in self.df.columns:
+                    df_indexed = self.df.set_index('datetime')
+                elif hasattr(self.df.index, 'min') and pd.api.types.is_datetime64_any_dtype(self.df.index):
+                    df_indexed = self.df  # Already has datetime index
+                else:
+                    raise ValueError("No datetime information available")
+                
                 ch4_original = df_indexed['CH4'].reindex(datetime_index, method='nearest', tolerance=pd.Timedelta('1H'))
                 if ch4_original.notna().sum() > len(ch4_original) * 0.5:  # At least 50% data available
                     extended_conc_data['CH4'] = ch4_original
@@ -3749,7 +3763,14 @@ class MMFPMFAnalyzer:
                 if 'CH4' not in conc_data.columns and 'CH4' in self.df.columns:
                     try:
                         # Create a properly indexed original data series for alignment
-                        df_indexed = self.df.set_index('datetime')
+                        # Handle both datetime column and index cases
+                        if 'datetime' in self.df.columns:
+                            df_indexed = self.df.set_index('datetime')
+                        elif hasattr(self.df.index, 'min') and pd.api.types.is_datetime64_any_dtype(self.df.index):
+                            df_indexed = self.df  # Already has datetime index
+                        else:
+                            raise ValueError("No datetime information available")
+                        
                         # Use reindex to align with concentration data index, forward fill gaps
                         ch4_original = df_indexed['CH4'].reindex(datetime_index_corr, method='nearest', tolerance=pd.Timedelta('1H'))
                         # Only add if we have sufficient data
@@ -3765,7 +3786,14 @@ class MMFPMFAnalyzer:
                 if 'H2S' not in conc_data.columns and 'H2S' in self.df.columns:
                     try:
                         # Create a properly indexed original data series for alignment
-                        df_indexed = self.df.set_index('datetime')
+                        # Handle both datetime column and index cases
+                        if 'datetime' in self.df.columns:
+                            df_indexed = self.df.set_index('datetime')
+                        elif hasattr(self.df.index, 'min') and pd.api.types.is_datetime64_any_dtype(self.df.index):
+                            df_indexed = self.df  # Already has datetime index
+                        else:
+                            raise ValueError("No datetime information available")
+                        
                         # Use reindex to align with concentration data index, forward fill gaps
                         h2s_original = df_indexed['H2S'].reindex(datetime_index_corr, method='nearest', tolerance=pd.Timedelta('1H'))
                         # Only add if we have sufficient data
@@ -7689,13 +7717,27 @@ Q(robust) Statistics:
             print("   [WARN] Unable to parse datetime for wind analysis")
             return
         
+        # Ensure datetime information is available - handle both column and index cases
+        datetime_series = None
+        if 'datetime' in self.df.columns:
+            # Case 1: datetime is a column
+            if not pd.api.types.is_datetime64_any_dtype(self.df['datetime']):
+                self.df['datetime'] = pd.to_datetime(self.df['datetime'])
+            datetime_series = self.df['datetime']
+        elif hasattr(self.df.index, 'min') and pd.api.types.is_datetime64_any_dtype(self.df.index):
+            # Case 2: datetime is in the index
+            datetime_series = self.df.index.to_series(name='datetime')
+        else:
+            print("   [WARN] No datetime information found in dataset - skipping wind analysis")
+            return
+        
         # Match meteorological data with PMF analysis times
         wind_data = []
         valid_indices = []
         
         for i, dt in enumerate(datetime_index):
             # Find closest match in original data
-            time_diff = np.abs((self.df['datetime'] - dt).dt.total_seconds())
+            time_diff = np.abs((datetime_series - dt).dt.total_seconds())
             closest_idx = time_diff.idxmin()
             
             # Only include if within reasonable time tolerance (e.g., 1 hour)
@@ -8189,13 +8231,27 @@ Q(robust) Statistics:
             print("   [WARN] Unable to parse datetime for temperature analysis")
             return
         
+        # Ensure datetime information is available - handle both column and index cases
+        datetime_series = None
+        if 'datetime' in self.df.columns:
+            # Case 1: datetime is a column
+            if not pd.api.types.is_datetime64_any_dtype(self.df['datetime']):
+                self.df['datetime'] = pd.to_datetime(self.df['datetime'])
+            datetime_series = self.df['datetime']
+        elif hasattr(self.df.index, 'min') and pd.api.types.is_datetime64_any_dtype(self.df.index):
+            # Case 2: datetime is in the index
+            datetime_series = self.df.index.to_series(name='datetime')
+        else:
+            print("   [WARN] No datetime information found in dataset - skipping temperature analysis")
+            return
+        
         # Match temperature data with PMF analysis times
         temp_data = []
         valid_indices = []
         
         for i, dt in enumerate(datetime_index):
             # Find closest match in original data
-            time_diff = np.abs((self.df['datetime'] - dt).dt.total_seconds())
+            time_diff = np.abs((datetime_series - dt).dt.total_seconds())
             closest_idx = time_diff.idxmin()
             
             # Only include if within reasonable time tolerance (e.g., 1 hour)
@@ -8616,13 +8672,27 @@ Q(robust) Statistics:
             print("   [WARN] Unable to parse datetime for pressure analysis")
             return
         
+        # Ensure datetime information is available - handle both column and index cases
+        datetime_series = None
+        if 'datetime' in self.df.columns:
+            # Case 1: datetime is a column
+            if not pd.api.types.is_datetime64_any_dtype(self.df['datetime']):
+                self.df['datetime'] = pd.to_datetime(self.df['datetime'])
+            datetime_series = self.df['datetime']
+        elif hasattr(self.df.index, 'min') and pd.api.types.is_datetime64_any_dtype(self.df.index):
+            # Case 2: datetime is in the index
+            datetime_series = self.df.index.to_series(name='datetime')
+        else:
+            print("   [WARN] No datetime information found in dataset - skipping pressure analysis")
+            return
+        
         # Match pressure data with PMF analysis times
         pressure_data = []
         valid_indices = []
         
         for i, dt in enumerate(datetime_index):
             # Find closest match in original data
-            time_diff = np.abs((self.df['datetime'] - dt).dt.total_seconds())
+            time_diff = np.abs((datetime_series - dt).dt.total_seconds())
             closest_idx = time_diff.idxmin()
             
             # Only include if within reasonable time tolerance (e.g., 1 hour)
@@ -9030,18 +9100,37 @@ Q(robust) Statistics:
             # SAFE APPROACH: Create independent pressure analysis without affecting PMF data
             # Work with a completely separate copy to avoid affecting PMF analysis
             pressure_df = self.df.copy()
-            pressure_df['datetime'] = pd.to_datetime(pressure_df['datetime'])
+            
+            # Handle both datetime column and index cases
+            if 'datetime' in pressure_df.columns:
+                pressure_df['datetime'] = pd.to_datetime(pressure_df['datetime'])
+            elif hasattr(pressure_df.index, 'min') and pd.api.types.is_datetime64_any_dtype(pressure_df.index):
+                # Datetime is in index - add as column for processing
+                pressure_df['datetime'] = pressure_df.index
+            else:
+                print("[WARN] No datetime information available for pressure derivative analysis")
+                return
             
             # Create pressure time series from current filtered data (original sparse measurements)
             pressure_indexed = pressure_df.set_index('datetime')['Pressure'].sort_index()
             
             # FIXED: Use actual concentration data timestamps instead of sparse regular grid
             # This preserves pressure variation by matching actual measurement times
-            concentration_rows = self.df[self.df.index.isin(self.concentration_data.index)]
-            # Sort by datetime to ensure proper chronological order
-            concentration_rows = concentration_rows.sort_values('datetime')
-            # Create properly formatted datetime index 
-            idx = pd.to_datetime(concentration_rows['datetime'].values).sort_values()
+            
+            # Get the datetime information properly
+            if hasattr(self.df.index, 'min') and pd.api.types.is_datetime64_any_dtype(self.df.index):
+                # Case: datetime is in index - use concentration data index directly
+                concentration_indices = self.concentration_data.index
+                matching_indices = self.df.index.intersection(concentration_indices)
+                idx = pd.to_datetime(matching_indices).sort_values()
+            elif 'datetime' in self.df.columns:
+                # Case: datetime is a column
+                concentration_rows = self.df[self.df.index.isin(self.concentration_data.index)]
+                concentration_rows = concentration_rows.sort_values('datetime')
+                idx = pd.to_datetime(concentration_rows['datetime'].values).sort_values()
+            else:
+                # Fallback: use concentration data index as is
+                idx = pd.to_datetime(self.concentration_data.index).sort_values()
             # Remove duplicates and ensure unique timestamps
             idx = pd.Index(idx).drop_duplicates().sort_values()
             
