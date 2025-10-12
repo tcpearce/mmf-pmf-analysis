@@ -131,7 +131,7 @@ This file tracks all changes made to the codebase with timestamps and descriptio
 - Automated data quality assessment tools
 - Advanced temporal analysis capabilities
 
-**Git Commit**: [To be added with this commit]
+**Git Commit**: [f74d815](https://github.com/tcpearce/mmf-pmf-analysis/commit/f74d815)
 
 ---
 
