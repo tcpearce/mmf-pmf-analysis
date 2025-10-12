@@ -1,0 +1,118 @@
+Enhanced 30min File Summary for Maries_Way
+======================================================================
+
+Created: 2025-10-12T13:20:50.868341
+Source: Enhanced 30min mapper with PMF best practices
+Records: 15,954
+Columns: 24
+Date range: 2024-09-02 15:00:00 to 2025-07-31 23:30:00
+Timezone: naive
+
+Species Configuration Applied:
+----------------------------------------
+CH4:
+  Native interval: 5 min
+  Expected n/30min: 6
+  Min samples: 3
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+SO2:
+  Native interval: 5 min
+  Expected n/30min: 6
+  Min samples: 3
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+H2S:
+  Native interval: 5 min
+  Expected n/30min: 6
+  Min samples: 3
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+PM1 FIDAS:
+  Native interval: 15 min
+  Expected n/30min: 6
+  Min samples: 1
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+PM2.5 FIDAS:
+  Native interval: 15 min
+  Expected n/30min: 6
+  Min samples: 1
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+PM4 FIDAS:
+  Native interval: 15 min
+  Expected n/30min: 6
+  Min samples: 1
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+PM10 FIDAS:
+  Native interval: 15 min
+  Expected n/30min: 6
+  Min samples: 1
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+TSP FIDAS:
+  Native interval: 15 min
+  Expected n/30min: 6
+  Min samples: 1
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+TEMP:
+  Native interval: 5 min
+  Expected n/30min: 6
+  Min samples: 2
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+Pressure:
+  Native interval: 5 min
+  Expected n/30min: 2
+  Min samples: 2
+  Aggregation: mean
+  Detected interval: 15.0 min
+
+Data Coverage:
+----------------------------------------
+
+Gas Species:
+  CH4: 98.7% (15,744/15,954)
+  H2S: 97.3% (15,516/15,954)
+  SO2: 96.5% (15,396/15,954)
+
+Particle Species:
+  PM1 FIDAS: 96.4% (15,387/15,954)
+  PM2.5 FIDAS: 96.4% (15,387/15,954)
+  PM4 FIDAS: 96.4% (15,387/15,954)
+  PM10 FIDAS: 96.4% (15,387/15,954)
+  TSP FIDAS: 96.4% (15,387/15,954)
+  n_PM1 FIDAS: 100.0% (15,954/15,954)
+  n_PM2.5 FIDAS: 100.0% (15,954/15,954)
+  n_PM4 FIDAS: 100.0% (15,954/15,954)
+  n_PM10 FIDAS: 100.0% (15,954/15,954)
+  n_TSP FIDAS: 100.0% (15,954/15,954)
+
+Meteorological Species:
+  TEMP: 96.4% (15,383/15,954)
+  Pressure: 94.3% (15,045/15,954)
+
+Sample Count Summary:
+----------------------------------------
+  CH4: 15744 above min (3), 210 below
+  H2S: 15516 above min (3), 438 below
+  PM1 FIDAS: 15387 above min (1), 567 below
+  PM10 FIDAS: 15387 above min (1), 567 below
+  PM2.5 FIDAS: 15387 above min (1), 567 below
+  PM4 FIDAS: 15387 above min (1), 567 below
+  Pressure: 15045 above min (2), 909 below
+  SO2: 15396 above min (3), 558 below
+  TEMP: 15383 above min (2), 571 below
+  TSP FIDAS: 15387 above min (1), 567 below

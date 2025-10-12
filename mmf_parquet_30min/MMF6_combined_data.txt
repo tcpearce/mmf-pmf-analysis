@@ -1,0 +1,136 @@
+Enhanced 30min File Summary for MMF6
+======================================================================
+
+Created: 2025-10-12T13:19:27.295631
+Source: Enhanced 30min mapper with PMF best practices
+Records: 0
+Columns: 28
+Date range: NaT to NaT
+Timezone: naive
+
+Species Configuration Applied:
+----------------------------------------
+WD:
+  Native interval: 5 min
+  Expected n/30min: 6
+  Min samples: 3
+  Aggregation: vector_mean
+  Detected interval: 5.0 min
+
+WS:
+  Native interval: 5 min
+  Expected n/30min: 6
+  Min samples: 3
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+CH4:
+  Native interval: 5 min
+  Expected n/30min: 6
+  Min samples: 3
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+SO2:
+  Native interval: 5 min
+  Expected n/30min: 6
+  Min samples: 3
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+H2S:
+  Native interval: 5 min
+  Expected n/30min: 6
+  Min samples: 3
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+PM1 FIDAS:
+  Native interval: 15 min
+  Expected n/30min: 6
+  Min samples: 1
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+PM2.5 FIDAS:
+  Native interval: 15 min
+  Expected n/30min: 6
+  Min samples: 1
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+PM4 FIDAS:
+  Native interval: 15 min
+  Expected n/30min: 6
+  Min samples: 1
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+PM10 FIDAS:
+  Native interval: 15 min
+  Expected n/30min: 6
+  Min samples: 1
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+TSP FIDAS:
+  Native interval: 15 min
+  Expected n/30min: 6
+  Min samples: 1
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+TEMP:
+  Native interval: 5 min
+  Expected n/30min: 6
+  Min samples: 2
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+Pressure:
+  Native interval: 5 min
+  Expected n/30min: 2
+  Min samples: 2
+  Aggregation: mean
+  Detected interval: 15.0 min
+
+Data Coverage:
+----------------------------------------
+
+Gas Species:
+  WD: nan% (0/0)
+  WS: nan% (0/0)
+  CH4: nan% (0/0)
+  H2S: nan% (0/0)
+  SO2: nan% (0/0)
+
+Particle Species:
+  PM1 FIDAS: nan% (0/0)
+  PM2.5 FIDAS: nan% (0/0)
+  PM4 FIDAS: nan% (0/0)
+  PM10 FIDAS: nan% (0/0)
+  TSP FIDAS: nan% (0/0)
+  n_PM1 FIDAS: nan% (0/0)
+  n_PM2.5 FIDAS: nan% (0/0)
+  n_PM4 FIDAS: nan% (0/0)
+  n_PM10 FIDAS: nan% (0/0)
+  n_TSP FIDAS: nan% (0/0)
+
+Meteorological Species:
+  TEMP: nan% (0/0)
+  Pressure: nan% (0/0)
+
+Sample Count Summary:
+----------------------------------------
+  CH4: 0 above min (3), 0 below
+  H2S: 0 above min (3), 0 below
+  PM1 FIDAS: 0 above min (1), 0 below
+  PM10 FIDAS: 0 above min (1), 0 below
+  PM2.5 FIDAS: 0 above min (1), 0 below
+  PM4 FIDAS: 0 above min (1), 0 below
+  Pressure: 0 above min (2), 0 below
+  SO2: 0 above min (3), 0 below
+  TEMP: 0 above min (2), 0 below
+  TSP FIDAS: 0 above min (1), 0 below
+  WD: 0 above min (3), 0 below
+  WS: 0 above min (3), 0 below

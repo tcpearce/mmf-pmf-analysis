@@ -1,0 +1,234 @@
+Data Summary for MMF2
+==================================================
+
+Total records: 75830
+Date range: 2021-03-04 16:30:00 to 2025-07-01 11:00:00
+Time span: 1579 days
+
+Data Availability:
+  WD: 72,113 / 75,830 (95.1%)
+  WS: 70,235 / 75,830 (92.6%)
+  CH4: 71,321 / 75,830 (94.1%)
+  NOX: 71,920 / 75,830 (94.8%)
+  NO: 71,920 / 75,830 (94.8%)
+  NO2: 71,920 / 75,830 (94.8%)
+  H2S: 70,869 / 75,830 (93.5%)
+  PM1 FIDAS: 70,429 / 75,830 (92.9%)
+  PM2.5 FIDAS: 70,473 / 75,830 (92.9%)
+  PM4 FIDAS: 70,429 / 75,830 (92.9%)
+  PM10 FIDAS: 70,473 / 75,830 (92.9%)
+  TSP FIDAS: 70,473 / 75,830 (92.9%)
+  TEMP: 70,287 / 75,830 (92.7%)
+  Pressure: 61,033 / 75,830 (80.5%)
+  n_WD: 75,795 / 75,830 (100.0%)
+  n_WS: 75,795 / 75,830 (100.0%)
+  n_CH4: 75,795 / 75,830 (100.0%)
+  n_NOX: 75,795 / 75,830 (100.0%)
+  n_NO: 75,795 / 75,830 (100.0%)
+  n_NO2: 75,795 / 75,830 (100.0%)
+  n_H2S: 75,795 / 75,830 (100.0%)
+  n_PM1 FIDAS: 75,830 / 75,830 (100.0%)
+  n_PM2.5 FIDAS: 75,830 / 75,830 (100.0%)
+  n_PM4 FIDAS: 75,830 / 75,830 (100.0%)
+  n_PM10 FIDAS: 75,830 / 75,830 (100.0%)
+  n_TSP FIDAS: 75,830 / 75,830 (100.0%)
+  n_TEMP: 75,830 / 75,830 (100.0%)
+  n_Pressure: 75,830 / 75,830 (100.0%)
+
+Basic Statistics (non-zero values only):
+
+WD:
+  Non-zero count: 72,113
+  Mean: 209.973
+  Median: 213.167
+  Min: 6.167
+  Max: 352.500
+
+WS:
+  Non-zero count: 70,235
+  Mean: 1.755
+  Median: 1.483
+  Min: 0.033
+  Max: 10.533
+
+CH4:
+  Non-zero count: 71,321
+  Mean: 1.984
+  Median: 1.414
+  Min: 1.258
+  Max: 115.603
+
+NOX:
+  Non-zero count: 71,920
+  Mean: 23.859
+  Median: 15.589
+  Min: 0.822
+  Max: 710.212
+
+NO:
+  Non-zero count: 71,920
+  Mean: 6.735
+  Median: 2.352
+  Min: 0.101
+  Max: 407.090
+
+NO2:
+  Non-zero count: 71,920
+  Mean: 13.551
+  Median: 11.137
+  Min: 0.102
+  Max: 229.851
+
+H2S:
+  Non-zero count: 70,869
+  Mean: 2.776
+  Median: 1.224
+  Min: 0.022
+  Max: 1311.370
+
+PM1 FIDAS:
+  Non-zero count: 70,427
+  Mean: 6.714
+  Median: 4.215
+  Min: 0.035
+  Max: 132.060
+
+PM2.5 FIDAS:
+  Non-zero count: 70,471
+  Mean: 8.349
+  Median: 6.070
+  Min: 0.090
+  Max: 150.099
+
+PM4 FIDAS:
+  Non-zero count: 70,427
+  Mean: 10.028
+  Median: 7.785
+  Min: 0.175
+  Max: 173.670
+
+PM10 FIDAS:
+  Non-zero count: 70,471
+  Mean: 13.239
+  Median: 10.615
+  Min: 0.225
+  Max: 670.510
+
+TSP FIDAS:
+  Non-zero count: 70,471
+  Mean: 17.562
+  Median: 13.820
+  Min: 0.260
+  Max: 1553.535
+
+TEMP:
+  Non-zero count: 69,268
+  Mean: 11.991
+  Median: 11.700
+  Min: 0.050
+  Max: 37.800
+
+Pressure:
+  Non-zero count: 61,033
+  Mean: 1000.918
+  Median: 1001.500
+  Min: 948.000
+  Max: 1039.000
+
+n_WD:
+  Non-zero count: 72,122
+  Mean: 5.976
+  Median: 6.000
+  Min: 1.000
+  Max: 6.000
+
+n_WS:
+  Non-zero count: 70,244
+  Mean: 5.976
+  Median: 6.000
+  Min: 1.000
+  Max: 6.000
+
+n_CH4:
+  Non-zero count: 71,349
+  Mean: 5.967
+  Median: 6.000
+  Min: 1.000
+  Max: 6.000
+
+n_NOX:
+  Non-zero count: 71,958
+  Mean: 5.967
+  Median: 6.000
+  Min: 1.000
+  Max: 6.000
+
+n_NO:
+  Non-zero count: 71,958
+  Mean: 5.967
+  Median: 6.000
+  Min: 1.000
+  Max: 6.000
+
+n_NO2:
+  Non-zero count: 71,958
+  Mean: 5.967
+  Median: 6.000
+  Min: 1.000
+  Max: 6.000
+
+n_H2S:
+  Non-zero count: 70,911
+  Mean: 5.966
+  Median: 6.000
+  Min: 1.000
+  Max: 6.000
+
+n_PM1 FIDAS:
+  Non-zero count: 72,025
+  Mean: 1.978
+  Median: 2.000
+  Min: 1.000
+  Max: 2.000
+
+n_PM2.5 FIDAS:
+  Non-zero count: 72,069
+  Mean: 1.978
+  Median: 2.000
+  Min: 1.000
+  Max: 2.000
+
+n_PM4 FIDAS:
+  Non-zero count: 72,025
+  Mean: 1.978
+  Median: 2.000
+  Min: 1.000
+  Max: 2.000
+
+n_PM10 FIDAS:
+  Non-zero count: 72,069
+  Mean: 1.978
+  Median: 2.000
+  Min: 1.000
+  Max: 2.000
+
+n_TSP FIDAS:
+  Non-zero count: 72,069
+  Mean: 1.978
+  Median: 2.000
+  Min: 1.000
+  Max: 2.000
+
+n_TEMP:
+  Non-zero count: 71,877
+  Mean: 1.978
+  Median: 2.000
+  Min: 1.000
+  Max: 2.000
+
+n_Pressure:
+  Non-zero count: 62,409
+  Mean: 1.978
+  Median: 2.000
+  Min: 1.000
+  Max: 2.000

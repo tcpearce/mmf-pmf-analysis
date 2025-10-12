@@ -1737,10 +1737,11 @@ class MMFPMFAnalyzer:
         # VOC species (BTEX compounds) - newly integrated
         voc_species = ['Benzene', 'Toluene', 'Ethylbenzene', 'Xylene']
         
-        # Check for available VOC data
+        # Check for available VOC data (exclude count columns like n_Benzene)
         available_vocs = []
         for col in self.df.columns:
-            if any(voc in col for voc in voc_species):
+            # Only include actual VOC species, not count columns or other derivatives
+            if any(voc in col for voc in voc_species) and not col.startswith('n_'):
                 available_vocs.append(col)
         
         if available_vocs and not self.remove_voc:
@@ -4820,6 +4821,8 @@ class MMFPMFAnalyzer:
         # Add complaint correlation parameters
         if cli_params['complaint_correlation_hours'] != 0:
             cmd_parts.append(f"--complaint-correlation-hours {cli_params['complaint_correlation_hours']}")
+            if cli_params.get('complaint_window_method', 'average') != 'average':
+                cmd_parts.append(f"--complaint-window {cli_params['complaint_window_method']}")
         
         # Add help detail flag if enabled  
         if cli_params['help_detail']:
@@ -4944,6 +4947,7 @@ class MMFPMFAnalyzer:
             
             # Complaint correlation analysis parameters
             'complaint_correlation_hours': (cli_params.get('complaint_correlation_hours', 0), 'Time window in hours for complaint correlation analysis (0 = daily aggregation)'),
+            'complaint_window': (cli_params.get('complaint_window_method', 'average'), 'Statistical aggregation method for complaint window data (peak, average, median, mode, range)'),
         }
         
         # Add species weighting if any applied

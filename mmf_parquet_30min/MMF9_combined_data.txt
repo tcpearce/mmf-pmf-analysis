@@ -1,0 +1,197 @@
+Enhanced 30min File Summary for MMF9
+======================================================================
+
+Created: 2025-10-12T13:20:50.324845
+Source: Enhanced 30min mapper with PMF best practices
+Records: 77,255
+Columns: 38
+Date range: 2021-03-05 12:30:00 to 2025-07-31 23:30:00
+Timezone: naive
+
+Species Configuration Applied:
+----------------------------------------
+WD:
+  Native interval: 5 min
+  Expected n/30min: 6
+  Min samples: 3
+  Aggregation: vector_mean
+  Detected interval: 5.0 min
+
+WS:
+  Native interval: 5 min
+  Expected n/30min: 6
+  Min samples: 3
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+CH4:
+  Native interval: 5 min
+  Expected n/30min: 6
+  Min samples: 3
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+NOX:
+  Native interval: 5 min
+  Expected n/30min: 6
+  Min samples: 3
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+NO:
+  Native interval: 5 min
+  Expected n/30min: 6
+  Min samples: 3
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+NO2:
+  Native interval: 5 min
+  Expected n/30min: 6
+  Min samples: 3
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+SO2:
+  Native interval: 5 min
+  Expected n/30min: 6
+  Min samples: 3
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+H2S:
+  Native interval: 5 min
+  Expected n/30min: 6
+  Min samples: 3
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+PM1 FIDAS:
+  Native interval: 15 min
+  Expected n/30min: 6
+  Min samples: 1
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+PM2.5 FIDAS:
+  Native interval: 15 min
+  Expected n/30min: 6
+  Min samples: 1
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+PM4 FIDAS:
+  Native interval: 15 min
+  Expected n/30min: 6
+  Min samples: 1
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+PM10 FIDAS:
+  Native interval: 15 min
+  Expected n/30min: 6
+  Min samples: 1
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+TSP FIDAS:
+  Native interval: 15 min
+  Expected n/30min: 6
+  Min samples: 1
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+TEMP:
+  Native interval: 5 min
+  Expected n/30min: 6
+  Min samples: 2
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+Pressure:
+  Native interval: 5 min
+  Expected n/30min: 2
+  Min samples: 2
+  Aggregation: mean
+  Detected interval: 15.0 min
+
+Benzene:
+  Native interval: 30 min
+  Expected n/30min: 1
+  Min samples: 1
+  Aggregation: mean
+  Detected interval: 30.0 min
+
+Toluene:
+  Native interval: 30 min
+  Expected n/30min: 1
+  Min samples: 1
+  Aggregation: mean
+  Detected interval: 30.0 min
+
+Ethylbenzene:
+  Native interval: 30 min
+  Expected n/30min: 1
+  Min samples: 1
+  Aggregation: mean
+  Detected interval: 30.0 min
+
+m&p-Xylene:
+  Native interval: 30 min
+  Expected n/30min: 1
+  Min samples: 1
+  Aggregation: mean
+  Detected interval: 30.0 min
+
+Data Coverage:
+----------------------------------------
+
+Gas Species:
+  WD: 98.2% (75,849/77,255)
+  WS: 98.2% (75,853/77,255)
+  CH4: 96.9% (74,865/77,255)
+  NOX: 94.5% (73,027/77,255)
+  NO: 94.5% (73,027/77,255)
+  NO2: 94.5% (73,027/77,255)
+  H2S: 98.1% (75,809/77,255)
+  SO2: 91.9% (70,965/77,255)
+
+Particle Species:
+  PM1 FIDAS: 99.4% (76,810/77,255)
+  PM2.5 FIDAS: 99.7% (77,060/77,255)
+  PM4 FIDAS: 99.4% (76,810/77,255)
+  PM10 FIDAS: 99.7% (77,060/77,255)
+  TSP FIDAS: 99.7% (77,017/77,255)
+  n_PM1 FIDAS: 100.0% (77,255/77,255)
+  n_PM2.5 FIDAS: 100.0% (77,255/77,255)
+  n_PM4 FIDAS: 100.0% (77,255/77,255)
+  n_PM10 FIDAS: 100.0% (77,255/77,255)
+  n_TSP FIDAS: 100.0% (77,255/77,255)
+
+VOC Species:
+  Benzene: 60.2% (46,539/77,255)
+  Toluene: 64.1% (49,524/77,255)
+  Ethylbenzene: 60.0% (46,350/77,255)
+  m&p-Xylene: 64.0% (49,430/77,255)
+
+Meteorological Species:
+  TEMP: 99.1% (76,572/77,255)
+  Pressure: 90.6% (70,031/77,255)
+
+Sample Count Summary:
+----------------------------------------
+  CH4: 74865 above min (3), 2390 below
+  H2S: 75809 above min (3), 1446 below
+  NO: 73027 above min (3), 4228 below
+  NO2: 73027 above min (3), 4228 below
+  NOX: 73027 above min (3), 4228 below
+  PM1 FIDAS: 76810 above min (1), 445 below
+  PM10 FIDAS: 77060 above min (1), 195 below
+  PM2.5 FIDAS: 77060 above min (1), 195 below
+  PM4 FIDAS: 76810 above min (1), 445 below
+  Pressure: 70031 above min (2), 7224 below
+  SO2: 70965 above min (3), 6290 below
+  TEMP: 76572 above min (2), 683 below
+  TSP FIDAS: 77017 above min (1), 238 below
+  WD: 75849 above min (3), 1406 below
+  WS: 75853 above min (3), 1402 below

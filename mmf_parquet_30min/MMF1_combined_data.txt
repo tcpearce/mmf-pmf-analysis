@@ -1,0 +1,107 @@
+Enhanced 30min File Summary for MMF1
+======================================================================
+
+Created: 2025-10-12T13:18:04.332340
+Source: Enhanced 30min mapper with PMF best practices
+Records: 59,394
+Columns: 22
+Date range: 2021-04-12 15:00:00 to 2024-08-31 23:30:00
+Timezone: naive
+
+Species Configuration Applied:
+----------------------------------------
+WD:
+  Native interval: 5 min
+  Expected n/30min: 6
+  Min samples: 3
+  Aggregation: vector_mean
+  Detected interval: 5.0 min
+
+WS:
+  Native interval: 5 min
+  Expected n/30min: 6
+  Min samples: 3
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+CH4:
+  Native interval: 5 min
+  Expected n/30min: 6
+  Min samples: 3
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+SO2:
+  Native interval: 5 min
+  Expected n/30min: 6
+  Min samples: 3
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+H2S:
+  Native interval: 5 min
+  Expected n/30min: 6
+  Min samples: 3
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+PM1 FIDAS:
+  Native interval: 15 min
+  Expected n/30min: 6
+  Min samples: 1
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+PM2.5 FIDAS:
+  Native interval: 15 min
+  Expected n/30min: 6
+  Min samples: 1
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+PM4 FIDAS:
+  Native interval: 15 min
+  Expected n/30min: 6
+  Min samples: 1
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+TEMP:
+  Native interval: 5 min
+  Expected n/30min: 6
+  Min samples: 2
+  Aggregation: mean
+  Detected interval: 5.0 min
+
+Data Coverage:
+----------------------------------------
+
+Gas Species:
+  WD: 99.0% (58,811/59,394)
+  WS: 99.0% (58,812/59,394)
+  CH4: 99.7% (59,221/59,394)
+  H2S: 92.7% (55,058/59,394)
+  SO2: 92.6% (55,024/59,394)
+
+Particle Species:
+  PM1 FIDAS: 99.9% (59,354/59,394)
+  PM2.5 FIDAS: 99.9% (59,354/59,394)
+  PM4 FIDAS: 99.9% (59,354/59,394)
+  n_PM1 FIDAS: 100.0% (59,394/59,394)
+  n_PM2.5 FIDAS: 100.0% (59,394/59,394)
+  n_PM4 FIDAS: 100.0% (59,394/59,394)
+
+Meteorological Species:
+  TEMP: 99.9% (59,353/59,394)
+
+Sample Count Summary:
+----------------------------------------
+  CH4: 59221 above min (3), 173 below
+  H2S: 55058 above min (3), 4336 below
+  PM1 FIDAS: 59354 above min (1), 40 below
+  PM2.5 FIDAS: 59354 above min (1), 40 below
+  PM4 FIDAS: 59354 above min (1), 40 below
+  SO2: 55024 above min (3), 4370 below
+  TEMP: 59353 above min (2), 41 below
+  WD: 58938 above min (3), 456 below
+  WS: 58812 above min (3), 582 below
