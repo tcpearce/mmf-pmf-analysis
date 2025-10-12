@@ -12,7 +12,7 @@ MMF_PARQUET_DIR = Path('mmf_parquet_final')
 MMF_RAW_DATA_DIR = Path('mmf_data_corrected')
 
 # Test data paths for development/testing workflows
-MMF_TEST_PARQUET_DIR = Path('mmf_test_30min')
+MMF_TEST_PARQUET_DIR = Path('mmf_parquet_30min')
 
 # Legacy paths (for backup/comparison only - DO NOT USE for new analysis)
 MMF_PARQUET_LEGACY = Path('mmf_parquet')
@@ -45,7 +45,7 @@ def get_mmf_parquet_file(station_or_mmf, use_test_data=True):
     
     Args:
         station_or_mmf: Either 'MMF1', 'MMF2', etc. or station name like 'Cemetery Road'
-        use_test_data: If True, use test data from mmf_test_30min (default for shortcuts)
+        use_test_data: If True, use test data from mmf_parquet_30min (default for shortcuts)
         
     Returns:
         Path to the parquet file (test data by default for shortcuts)
@@ -231,7 +231,7 @@ if __name__ == "__main__":
             exists = "✅" if file_path.exists() else "❌"
             print(f"  {exists} {mmf_id}: {file_path}")
     else:
-        print("  ❌ No test files found in mmf_test_30min/")
+        print("  ❌ No test files found in mmf_parquet_30min/")
     print()
     
     print("Station shortcut behavior:")

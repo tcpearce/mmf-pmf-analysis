@@ -18,7 +18,17 @@ class ParquetAnalyzer:
         """Load parquet data and metadata."""
         try:
             # Read parquet file
-            self.df = pd.read_parquet(self.parquet_file)
+            df_raw = pd.read_parquet(self.parquet_file)
+            
+            # CRITICAL FIX: Properly set datetime column as index
+            if 'datetime' in df_raw.columns:
+                self.df = df_raw.set_index('datetime')
+                self.df.index = pd.to_datetime(self.df.index)
+                print(f"✅ Datetime index set correctly from 'datetime' column")
+            else:
+                # Fallback: no datetime column found, use raw data
+                self.df = df_raw
+                print(f"⚠️  No 'datetime' column found - using numeric index")
             
             # Read parquet metadata
             parquet_file = pq.ParquetFile(self.parquet_file)
@@ -27,6 +37,11 @@ class ParquetAnalyzer:
             
             print(f"Successfully loaded: {self.parquet_file.name}")
             print(f"Data shape: {self.df.shape}")
+            if hasattr(self.df.index, 'min') and hasattr(self.df.index, 'max'):
+                try:
+                    print(f"Date range: {self.df.index.min()} to {self.df.index.max()}")
+                except:
+                    print(f"Index range: {self.df.index[0]} to {self.df.index[-1]}")
             return True
             
         except Exception as e:

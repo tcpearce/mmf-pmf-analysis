@@ -18,6 +18,24 @@ logging.basicConfig(
     ]
 )
 
+# Production file mapping for VOC data extraction
+PRODUCTION_VOC_MAPPING = {
+    'MMF9': 'mmf_parquet_final/MMF9_Galingale_View_combined_data.parquet',
+    'MMF2': 'mmf_parquet_final/MMF2_Silverdale_Pumping_Station_combined_data.parquet',
+    'MMF1': 'mmf_parquet_final/MMF1_Cemetery_Road_combined_data.parquet',
+    'Maries_Way': 'mmf_parquet_final/Maries_Way_combined_data.parquet',
+    'MMF6': 'mmf_parquet_final/MMF6_Fire_Station_combined_data.parquet'
+}
+
+# VOC species and their units
+VOC_SPECIES = ['Benzene', 'Toluene', 'Ethylbenzene', 'm&p-Xylene']
+VOC_UNITS = {
+    'Benzene': 'ug/m3',
+    'Toluene': 'ug/m3',
+    'Ethylbenzene': 'ug/m3',
+    'm&p-Xylene': 'ug/m3'
+}
+
 class MMFProcessor:
     def __init__(self, output_dir="mmf_parquet", target_timebase: str = "15min", aggregate_method: str = "mean", min_valid_subsamples: int = 2, include_voc: bool = True,
                  filter_start: str = None, filter_end: str = None, gas_sheet: str = None, particle_sheet: str = None):
@@ -289,6 +307,96 @@ class MMFProcessor:
             logging.error(f"Error aligning data: {str(e)}")
             return None
 
+    def read_voc_data_from_production(self, station_name):
+        """Read VOC data from production parquet files.
+        Returns DataFrame with datetime and VOC columns only.
+        """
+        try:
+            production_file = PRODUCTION_VOC_MAPPING.get(station_name)
+            if not production_file:
+                logging.warning(f"No production VOC mapping available for {station_name}")
+                return None
+                
+            production_path = Path(production_file)
+            if not production_path.exists():
+                logging.warning(f"Production VOC file not found: {production_path}")
+                return None
+            
+            logging.info(f"Reading VOC data from production file: {production_path}")
+            
+            # Read production file
+            df = pd.read_parquet(production_path)
+            df['datetime'] = pd.to_datetime(df['datetime'])
+            
+            # Extract VOC columns that exist in the file
+            available_voc_cols = [col for col in VOC_SPECIES if col in df.columns]
+            
+            if not available_voc_cols:
+                logging.warning(f"No VOC columns found in production data for {station_name}")
+                return None
+            
+            logging.info(f"Available VOC species: {available_voc_cols}")
+            
+            # Create VOC-only dataframe
+            voc_df = df[['datetime'] + available_voc_cols].copy()
+            
+            # Filter to records where at least one VOC value exists
+            voc_df = voc_df[voc_df[available_voc_cols].notna().any(axis=1)]
+            
+            # Apply date filters if specified
+            if self.filter_start is not None:
+                voc_df = voc_df[voc_df['datetime'] >= self.filter_start]
+            if self.filter_end is not None:
+                voc_df = voc_df[voc_df['datetime'] <= self.filter_end]
+            
+            # Sort by datetime
+            voc_df = voc_df.sort_values('datetime').reset_index(drop=True)
+            
+            logging.info(f"Extracted {len(voc_df):,} VOC records from production data")
+            
+            # Log coverage for each VOC species
+            for col in available_voc_cols:
+                voc_count = voc_df[col].notna().sum()
+                total_count = len(voc_df)
+                coverage = (voc_count / total_count) * 100 if total_count > 0 else 0
+                logging.info(f"  {col}: {voc_count:,}/{total_count:,} ({coverage:.1f}% coverage)")
+            
+            return voc_df
+            
+        except Exception as e:
+            logging.error(f"Error reading VOC data from production for {station_name}: {str(e)}")
+            return None
+    
+    def align_voc_with_combined_data(self, combined_df, voc_df):
+        """Merge VOC data with gas/particle combined data.
+        Uses left join to preserve all combined data timestamps.
+        """
+        try:
+            if voc_df is None or len(voc_df) == 0:
+                logging.info("No VOC data to merge")
+                return combined_df
+            
+            logging.info(f"Merging VOC data: {len(voc_df):,} VOC records with {len(combined_df):,} combined records")
+            
+            # Merge on datetime (left join preserves all combined data timestamps)
+            result = combined_df.merge(voc_df, on='datetime', how='left')
+            
+            # Log merge statistics
+            voc_cols = [col for col in voc_df.columns if col != 'datetime']
+            total_count = len(result)
+            
+            logging.info("VOC merge results:")
+            for col in voc_cols:
+                voc_count = result[col].notna().sum()
+                coverage = (voc_count / total_count) * 100 if total_count > 0 else 0
+                logging.info(f"  {col}: {voc_count:,}/{total_count:,} ({coverage:.1f}% coverage)")
+            
+            return result
+            
+        except Exception as e:
+            logging.error(f"Error aligning VOC data with combined data: {str(e)}")
+            return combined_df
+
     def save_to_parquet(self, df, station_name, all_units):
         """Save DataFrame to parquet with units and aggregation metadata."""
         try:
@@ -324,6 +432,14 @@ class MMFProcessor:
             metadata['aggregation_method'] = self.aggregate_method
             metadata['min_valid_subsamples'] = self.min_valid_subsamples
             metadata['source'] = 'MMF Excel files'
+            
+            # Add VOC metadata if VOC data is present
+            voc_cols_in_data = [col for col in VOC_SPECIES if col in df.columns]
+            if voc_cols_in_data:
+                metadata['voc_source'] = 'production_parquet_files'
+                metadata['voc_native_timebase'] = '30min'
+                metadata['voc_species_available'] = len(voc_cols_in_data)
+                metadata['voc_species_list'] = ','.join(voc_cols_in_data)
             if self.filter_start is not None:
                 metadata['filter_start'] = str(self.filter_start)
             if self.filter_end is not None:
@@ -361,6 +477,16 @@ class MMFProcessor:
                 f.write("Processing notes:\n")
                 f.write("- Gas data: 5-minute native, aggregated to target timebase\n")
                 f.write("- Particle data: 15-minute native, aggregated to target timebase as needed\n")
+                
+                # Add VOC processing notes if VOC data is present
+                voc_cols_in_data = [col for col in VOC_SPECIES if col in df.columns]
+                if voc_cols_in_data:
+                    f.write(f"- VOC data: 30-minute native from production files, merged with gas/particle data\n")
+                    f.write(f"- VOC species included: {', '.join(voc_cols_in_data)}\n")
+                    f.write(f"- VOC data source: production parquet files\n")
+                else:
+                    f.write("- VOC data: Not included (timebase incompatible or include_voc=False)\n")
+                
                 f.write("- No forward-fill applied; aggregation enforces minimum coverage and preserves NaNs\n")
                 f.write("- Count columns prefixed with 'n_' provide the number of valid sub-samples per window per species\n")
                 f.write("- Missing values preserved as NaN\n")
@@ -384,8 +510,10 @@ class MMFProcessor:
                         f.write(" (m/s)")
                     elif 'TEMP' in col:
                         f.write(" (°C)")
-                    elif 'AMB_PRES' in col:
+                    elif 'AMB_PRES' in col or 'Pressure' in col:
                         f.write(" (hPa)")
+                    elif col in VOC_SPECIES:
+                        f.write(" (ug/m3)")
                     elif 'datetime' in col:
                         f.write(" (timestamp)")
                     elif 'available' in col:
@@ -483,7 +611,24 @@ class MMFProcessor:
             if combined_data is None:
                 return False
             
-            # Save to parquet with units
+            # Add VOC data if requested and compatible with timebase
+            if self.include_voc and self.target_timebase == "30min":
+                logging.info("VOC inclusion requested and timebase is 30min - reading VOC data...")
+                voc_data = self.read_voc_data_from_production(station_name)
+                combined_data = self.align_voc_with_combined_data(combined_data, voc_data)
+                
+                # Add VOC units to all_units dictionary
+                if voc_data is not None:
+                    voc_cols_in_data = [col for col in VOC_SPECIES if col in combined_data.columns]
+                    for col in voc_cols_in_data:
+                        all_units[col] = VOC_UNITS.get(col, 'ug/m3')
+                    logging.info(f"Added VOC units for: {voc_cols_in_data}")
+            elif self.include_voc and self.target_timebase != "30min":
+                logging.warning(f"VOC inclusion requested but timebase is {self.target_timebase} (not 30min) - skipping VOC integration")
+            else:
+                logging.info("VOC inclusion not requested or not enabled")
+            
+            # Save to parquet with units (now includes VOC units if applicable)
             if not self.save_to_parquet(combined_data, station_name, all_units):
                 return False
             

@@ -108,7 +108,7 @@ No data files are committed to the repository; adjust paths or mmf_config.py if 
 # Process raw Excel files to 30-minute aggregated parquet
 python process_mmf_fixed.py --station MMF2 \\
   --timebase 30min --aggregate mean --min-valid-subsamples 2 \\
-  --include-voc --output-dir mmf_test_30min
+  --include-voc --output-dir mmf_parquet_30min
 ```
 
 ### **2. PMF Source Apportionment (EPA Mode)**
@@ -117,7 +117,7 @@ python process_mmf_fixed.py --station MMF2 \\
 ```bash
 # EPA PMF 5.0 with S/N categorization (recommended)
 python pmf_source_apportionment_fixed.py \\
-  --data-dir "mmf_test_30min" \\
+  --data-dir "mmf_parquet_30min" \\
   --patterns "*mmf2*.parquet" \\
   --start-date 2023-09-01 --end-date 2023-09-30 \\
   --output-dir "pmf_results_epa" \\
@@ -140,7 +140,7 @@ python pmf_source_apportionment_fixed.py MMF2 \\
 **Comprehensive analysis with all features:**
 ```bash
 python pmf_source_apportionment_fixed.py \\
-  --data-dir "mmf_test_30min" \\
+  --data-dir "mmf_parquet_30min" \\
   --patterns "*mmf9*.parquet" \\
   --start-date 2023-09-01 --end-date 2023-09-30 \\
   --output-dir "pmf_comprehensive" \\

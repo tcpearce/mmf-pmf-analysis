@@ -31,6 +31,213 @@ import subprocess
 import json
 import multiprocessing as mp
 
+def validate_date_string(date_str, param_name="date", auto_correct=True):
+    """
+    Validate a date string in YYYY-MM-DD format with optional auto-correction.
+    
+    Args:
+        date_str (str): Date string to validate
+        param_name (str): Parameter name for error messages
+        auto_correct (bool): If True, auto-correct invalid dates to last valid day of month
+        
+    Returns:
+        str: The validated (and potentially corrected) date string
+        
+    Raises:
+        ValueError: If date string is invalid and cannot be auto-corrected
+    """
+    if date_str is None:
+        return None
+        
+    if not isinstance(date_str, str):
+        raise ValueError(f"{param_name} must be a string in YYYY-MM-DD format, got {type(date_str).__name__}")
+    
+    # Check basic format
+    if len(date_str) != 10 or date_str[4] != '-' or date_str[7] != '-':
+        raise ValueError(f"Invalid {param_name} format '{date_str}'. Expected YYYY-MM-DD format (e.g., 2023-06-30)")
+    
+    # Check if parts are numeric
+    parts = date_str.split('-')
+    if len(parts) != 3:
+        raise ValueError(f"Invalid {param_name} format '{date_str}'. Expected YYYY-MM-DD format (e.g., 2023-06-30)")
+    
+    try:
+        year, month, day = parts
+        year = int(year)
+        month = int(month)
+        day = int(day)
+    except ValueError:
+        raise ValueError(f"Invalid {param_name} '{date_str}'. Year, month, and day must be numeric. Expected YYYY-MM-DD format (e.g., 2023-06-30)")
+    
+    # Validate ranges
+    if year < 1900 or year > 2100:
+        raise ValueError(f"Invalid year in {param_name} '{date_str}'. Year must be between 1900 and 2100")
+    
+    if month < 1 or month > 12:
+        raise ValueError(f"Invalid month in {param_name} '{date_str}'. Month must be between 01 and 12")
+    
+    if day < 1 or day > 31:
+        raise ValueError(f"Invalid day in {param_name} '{date_str}'. Day must be between 01 and 31")
+    
+    # Helper function to get max days in month
+    def get_max_days_in_month(year, month):
+        if month == 2:  # February
+            return 29 if (year % 4 == 0 and year % 100 != 0) or (year % 400 == 0) else 28
+        elif month in [4, 6, 9, 11]:  # April, June, September, November
+            return 30
+        else:
+            return 31
+    
+    # Try to parse as actual date to catch invalid dates like 2023-09-31
+    try:
+        from datetime import datetime
+        datetime.strptime(date_str, '%Y-%m-%d')
+        return date_str  # Valid date, return as-is
+    except ValueError as e:
+        if "day is out of range for month" in str(e) and auto_correct:
+            # Auto-correct to last valid day of month
+            max_days = get_max_days_in_month(year, month)
+            corrected_date = f"{year}-{month:02d}-{max_days:02d}"
+            
+            # Get the month name for better message
+            month_names = ['', 'January', 'February', 'March', 'April', 'May', 'June',
+                          'July', 'August', 'September', 'October', 'November', 'December']
+            month_name = month_names[month] if 1 <= month <= 12 else f"month {month:02d}"
+            
+            print(f"[WARNING] Auto-corrected invalid {param_name} '{date_str}' to '{corrected_date}'. {month_name} {year} has only {max_days} days.")
+            return corrected_date
+        elif "day is out of range for month" in str(e):
+            # No auto-correction, provide helpful error message
+            month_names = ['', 'January', 'February', 'March', 'April', 'May', 'June',
+                          'July', 'August', 'September', 'October', 'November', 'December']
+            month_name = month_names[month] if 1 <= month <= 12 else f"month {month:02d}"
+            max_days = get_max_days_in_month(year, month)
+            
+            raise ValueError(f"Invalid {param_name} '{date_str}'. {month_name} {year} has only {max_days} days. Try {year}-{month:02d}-{max_days:02d}")
+        else:
+            raise ValueError(f"Invalid {param_name} '{date_str}': {e}")
+
+def calculate_psychometric_fit(x_values, y_values, min_samples=6):
+    """
+    Fit psychometric sigmoid curve for concentration vs complaints.
+    
+    Fits a 4-parameter sigmoid: y = ymin + (ymax-ymin) / (1 + exp(-(x-x50)/slope))
+    where:
+    - ymin: minimum response (forced to 0 for zero concentration = zero complaints)
+    - ymax: maximum response (upper asymptote)
+    - x50: concentration at 50% of maximum response (threshold)
+    - slope: steepness of the curve
+    
+    Args:
+        x_values (array-like): Concentration values (continuous)
+        y_values (array-like): Complaint values (continuous)
+        min_samples (int): Minimum number of samples required for analysis
+        
+    Returns:
+        dict: Dictionary containing psychometric fit metrics and predictions
+    """
+    try:
+        from scipy.optimize import curve_fit
+        import numpy as np
+        
+        # Convert to numpy arrays and remove NaN values
+        x = np.array(x_values).flatten()
+        y = np.array(y_values).flatten()
+        
+        # Remove NaN/inf values and ensure non-negative
+        valid_mask = np.isfinite(x) & np.isfinite(y) & (x >= 0) & (y >= 0)
+        x = x[valid_mask]
+        y = y[valid_mask]
+        
+        # Check if we have enough samples and variation
+        if len(x) < min_samples or len(np.unique(x)) < 3 or len(np.unique(y)) < 2:
+            return None
+        
+        # Define 3-parameter sigmoid (constrained to pass through origin)
+        def psychometric_sigmoid(x, ymax, x50, slope):
+            """3-parameter sigmoid: ymin=0 (forced), ymax, x50 (threshold), slope"""
+            return ymax / (1 + np.exp(-(x - x50) / slope))
+        
+        # Initial parameter estimates
+        ymax_init = np.max(y) * 1.1  # Slightly above max
+        x50_init = np.median(x)      # Threshold at median concentration
+        slope_init = (np.max(x) - np.min(x)) / 4  # Reasonable slope
+        
+        # Parameter bounds (ymax>0, x50>0, slope>0)
+        bounds = ([0.1, 0.001, 0.001], [np.max(y) * 2, np.max(x) * 2, np.max(x)])
+        
+        try:
+            # Fit the psychometric curve
+            params, covariance = curve_fit(
+                psychometric_sigmoid, x, y,
+                p0=[ymax_init, x50_init, slope_init],
+                bounds=bounds,
+                maxfev=2000
+            )
+            
+            ymax, x50, slope = params
+            
+            # Generate smooth curve for plotting (including zero)
+            x_plot = np.linspace(0, np.max(x) * 1.1, 100)
+            y_pred_plot = psychometric_sigmoid(x_plot, ymax, x50, slope)
+            
+            # Calculate predictions for original data points
+            y_pred = psychometric_sigmoid(x, ymax, x50, slope)
+            
+            # Calculate fit quality metrics
+            # R-squared
+            ss_res = np.sum((y - y_pred) ** 2)
+            ss_tot = np.sum((y - np.mean(y)) ** 2)
+            r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
+            
+            # Root Mean Square Error
+            rmse = np.sqrt(np.mean((y - y_pred) ** 2))
+            
+            # Normalized RMSE
+            nrmse = rmse / (np.max(y) - np.min(y)) if (np.max(y) - np.min(y)) > 0 else float('inf')
+            
+            # Calculate parameter uncertainties from covariance
+            param_errors = np.sqrt(np.diag(covariance))
+            
+            # Threshold metrics
+            threshold_10 = x50 - slope * np.log(9)  # 10% of max response
+            threshold_90 = x50 + slope * np.log(9)  # 90% of max response
+            dynamic_range = threshold_90 - threshold_10
+            
+            print(f"   [PSYCHOMETRIC] Fitted sigmoid: ymax={ymax:.2f}, x50={x50:.3f}, slope={slope:.3f}")
+            print(f"   [PSYCHOMETRIC] Thresholds: 10%={threshold_10:.3f}, 50%={x50:.3f}, 90%={threshold_90:.3f} μg/m³")
+            
+            return {
+                'fit_type': 'psychometric_sigmoid',
+                'parameters': {'ymax': ymax, 'x50_threshold': x50, 'slope': slope},
+                'parameter_errors': {'ymax_err': param_errors[0], 'x50_err': param_errors[1], 'slope_err': param_errors[2]},
+                'r_squared': r_squared,
+                'rmse': rmse,
+                'nrmse': nrmse,
+                'n_samples': len(x),
+                'sigmoid_x': x_plot,
+                'sigmoid_y': y_pred_plot,
+                'predicted_values': y_pred,
+                'thresholds': {
+                    'threshold_10': max(0, threshold_10),
+                    'threshold_50': x50,
+                    'threshold_90': threshold_90,
+                    'dynamic_range': dynamic_range
+                },
+                'passes_origin': True,  # By design
+                'max_response': ymax
+            }
+            
+        except (RuntimeError, ValueError) as fit_error:
+            print(f"   [PSYCHOMETRIC] Curve fitting failed: {fit_error}")
+            return None
+        
+    except Exception as e:
+        print(f"   [WARN] Psychometric curve fitting failed: {e}")
+        return None
+
+# Hosmer-Lemeshow function removed - no longer needed for psychometric fitting
+
 # PDF conversion imports
 try:
     import pdfkit
@@ -47,8 +254,9 @@ if not (HAS_PDFKIT or HAS_WEASYPRINT):
 # PCA analysis imports
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
-from sklearn.metrics import r2_score
-from scipy.stats import pearsonr
+from sklearn.metrics import r2_score, log_loss, roc_auc_score, roc_curve
+from sklearn.linear_model import LogisticRegression
+from scipy.stats import pearsonr, chisquare
 
 # Import our existing analyzer for data loading
 from analyze_parquet_data import ParquetAnalyzer
@@ -267,7 +475,9 @@ class MMFPMFAnalyzer:
                  # Bootstrap error estimation parameters
                  bootstrap=False, bootstrap_n=100, bootstrap_block_size=None, bootstrap_threshold=0.6,
                  bootstrap_parallel=True, bootstrap_cpus=None, bootstrap_seed=None, bootstrap_keep_h=True,
-                 bootstrap_reuse_seed=True, bootstrap_overlapping=False):
+                 bootstrap_reuse_seed=True, bootstrap_overlapping=False,
+                 # Complaint correlation analysis parameters
+                 complaint_correlation_hours=0, complaint_window_method='average'):
         """
         Initialize PMF analyzer for MMF data.
         
@@ -328,12 +538,22 @@ class MMFPMFAnalyzer:
             bootstrap_keep_h (bool): Keep factor profiles (H matrix) from bootstrap samples (default: True)
             bootstrap_reuse_seed (bool): Reuse seed across bootstrap samples for deterministic resampling
             bootstrap_overlapping (bool): Allow overlapping blocks in bootstrap resampling (default: True)
+            
+            # Complaint correlation analysis parameters
+            complaint_correlation_hours (int): Time window in hours for complaint correlation analysis.
+                Default 0 uses daily aggregation. Positive values correlate complaints with 
+                ±N hours of concentration data around each complaint timestamp.
+            complaint_window_method (str): Statistical aggregation method for data within complaint
+                correlation time windows: 'peak' (maximum), 'average' (mean), 'median', 'mode'
+                (most frequent), 'range' (max-min). Only used when complaint_correlation_hours > 0.
         """
         self.station = station
         self.data_dir = data_dir
         self.patterns = patterns
-        self.start_date = start_date
-        self.end_date = end_date
+        
+        # Validate date formats before storing them
+        self.start_date = validate_date_string(start_date, "start_date")
+        self.end_date = validate_date_string(end_date, "end_date")
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(exist_ok=True, parents=True)
         self.remove_voc = remove_voc
@@ -478,6 +698,90 @@ class MMFPMFAnalyzer:
         
         # Bootstrap results storage
         self.bootstrap_results = None
+        
+        # Complaint correlation analysis parameters
+        self.complaint_correlation_hours = int(complaint_correlation_hours) if complaint_correlation_hours >= 0 else 0
+        self.complaint_window_method = complaint_window_method if complaint_window_method in ['peak', 'average', 'median', 'mode', 'range'] else 'average'
+    
+    def _aggregate_window_data(self, data_window, method='average'):
+        """Apply statistical aggregation to data within a complaint time window.
+        
+        Args:
+            data_window (pd.DataFrame): Data within the time window
+            method (str): Aggregation method - 'peak', 'average', 'median', 'mode', 'range'
+            
+        Returns:
+            pd.Series: Aggregated values for each column
+        """
+        if len(data_window) == 0:
+            return pd.Series(index=data_window.columns, dtype=float)
+            
+        try:
+            if method == 'peak':
+                # Maximum value
+                return data_window.max()
+            elif method == 'average':
+                # Mean value (default)
+                return data_window.mean()
+            elif method == 'median':
+                # Median value
+                return data_window.median()
+            elif method == 'mode':
+                # Most frequent value (for continuous data, use median as fallback)
+                mode_result = data_window.mode()
+                if len(mode_result) > 0:
+                    return mode_result.iloc[0]  # Take first mode if multiple exist
+                else:
+                    return data_window.median()  # Fallback to median
+            elif method == 'range':
+                # Range (max - min)
+                return data_window.max() - data_window.min()
+            else:
+                # Default to average
+                return data_window.mean()
+        except Exception as e:
+            # Fallback to mean if any aggregation method fails
+            print(f"[WARN] Aggregation method '{method}' failed, using mean: {e}")
+            return data_window.mean()
+    
+    def _calculate_window_uncertainty(self, data_window, aggregated_value, method='average'):
+        """Calculate appropriate uncertainty measure for the aggregated data.
+        
+        Args:
+            data_window (pd.DataFrame): Data within the time window
+            aggregated_value (pd.Series): The aggregated values
+            method (str): Aggregation method used
+            
+        Returns:
+            pd.Series: Uncertainty measures for each column
+        """
+        if len(data_window) == 0:
+            return pd.Series(index=data_window.columns, dtype=float)
+            
+        try:
+            if method == 'peak':
+                # For peak, use standard deviation as uncertainty measure
+                return data_window.std()
+            elif method == 'average':
+                # For average, standard deviation is appropriate
+                return data_window.std()
+            elif method == 'median':
+                # For median, use MAD (Median Absolute Deviation) scaled to std
+                mad = data_window.sub(data_window.median()).abs().median()
+                return mad * 1.4826  # Scale factor to approximate standard deviation
+            elif method == 'mode':
+                # For mode, use standard deviation
+                return data_window.std()
+            elif method == 'range':
+                # For range, uncertainty is the interquartile range
+                return data_window.quantile(0.75) - data_window.quantile(0.25)
+            else:
+                # Default to standard deviation
+                return data_window.std()
+        except Exception as e:
+            # Fallback to standard deviation if calculation fails
+            print(f"[WARN] Uncertainty calculation for method '{method}' failed, using std: {e}")
+            return data_window.std()
     
     def _parse_species_weights(self, species_weight_list):
         """Parse species weight specifications into a dictionary.
@@ -1365,24 +1669,53 @@ class MMFPMFAnalyzer:
             self._filter_date_range()
         
         print(f"[OK] Loaded {len(self.df):,} records")
-        print(f"[DATE] Date range: {self.df['datetime'].min()} to {self.df['datetime'].max()}")
+        # Report date range based on where datetime information is located
+        if hasattr(self.df.index, 'min') and hasattr(self.df.index, 'max'):
+            try:
+                print(f"[DATE] Date range: {self.df.index.min()} to {self.df.index.max()}")
+            except:
+                print(f"[DATE] Index range: {self.df.index[0]} to {self.df.index[-1]}")
+        elif 'datetime' in self.df.columns:
+            print(f"[DATE] Date range: {self.df['datetime'].min()} to {self.df['datetime'].max()}")
+        else:
+            print(f"[DATE] No datetime information available")
     
     def _filter_date_range(self):
         """Filter data by specified date range."""
         original_len = len(self.df)
         
-        if self.start_date:
-            start_dt = pd.to_datetime(self.start_date)
-            self.df = self.df[self.df['datetime'] >= start_dt]
-        
-        if self.end_date:
-            end_dt = pd.to_datetime(self.end_date)
-            # If start and end dates are the same, include the full 24 hours of that day
-            if self.start_date and self.start_date == self.end_date:
-                # Add 23:59:59 to include the entire day
-                end_dt = end_dt + pd.Timedelta(hours=23, minutes=59, seconds=59)
-                print(f"[DATE] Same start/end date detected - including full 24 hours of {self.start_date}")
-            self.df = self.df[self.df['datetime'] <= end_dt]
+        # Check if datetime is in the index (new behavior) or as a column (legacy)
+        if hasattr(self.df.index, 'min') and hasattr(self.df.index, 'max'):
+            # Datetime is in the index - filter by index
+            if self.start_date:
+                start_dt = pd.to_datetime(self.start_date)
+                self.df = self.df[self.df.index >= start_dt]
+            
+            if self.end_date:
+                end_dt = pd.to_datetime(self.end_date)
+                # If start and end dates are the same, include the full 24 hours of that day
+                if self.start_date and self.start_date == self.end_date:
+                    # Add 23:59:59 to include the entire day
+                    end_dt = end_dt + pd.Timedelta(hours=23, minutes=59, seconds=59)
+                    print(f"[DATE] Same start/end date detected - including full 24 hours of {self.start_date}")
+                self.df = self.df[self.df.index <= end_dt]
+        elif 'datetime' in self.df.columns:
+            # Legacy: datetime is a column
+            if self.start_date:
+                start_dt = pd.to_datetime(self.start_date)
+                self.df = self.df[self.df['datetime'] >= start_dt]
+            
+            if self.end_date:
+                end_dt = pd.to_datetime(self.end_date)
+                # If start and end dates are the same, include the full 24 hours of that day
+                if self.start_date and self.start_date == self.end_date:
+                    # Add 23:59:59 to include the entire day
+                    end_dt = end_dt + pd.Timedelta(hours=23, minutes=59, seconds=59)
+                    print(f"[DATE] Same start/end date detected - including full 24 hours of {self.start_date}")
+                self.df = self.df[self.df['datetime'] <= end_dt]
+        else:
+            print(f"[WARN] No datetime information found - cannot filter by date range")
+            return
         
         filtered_len = len(self.df)
         print(f"[DATA] Date filtering: {filtered_len:,} records ({original_len - filtered_len:,} excluded)")
@@ -2077,8 +2410,13 @@ class MMFPMFAnalyzer:
                 n_meas = int((~missing_mask & ~bdl_mask).sum())
                 n_bdl = int(bdl_mask.sum())
                 n_missing = int(missing_mask.sum())
-                print(f"   [OK] {species}: EF={EF:.3f}, MDL={MDL:.1f} | measured={n_meas} ({n_meas/total*100:.1f}%), "
-                      f"BDL={n_bdl} ({n_bdl/total*100:.1f}%), missing={n_missing} ({n_missing/total*100:.1f}%)")
+                
+                # Prevent division by zero when no data records exist
+                if total > 0:
+                    print(f"   [OK] {species}: EF={EF:.3f}, MDL={MDL:.1f} | measured={n_meas} ({n_meas/total*100:.1f}%), "
+                          f"BDL={n_bdl} ({n_bdl/total*100:.1f}%), missing={n_missing} ({n_missing/total*100:.1f}%)")
+                else:
+                    print(f"   [WARN] {species}: EF={EF:.3f}, MDL={MDL:.1f} | No data records available (total=0)")
             else:
                 # Fallback for species not handled by EPA calculator
                 print(f"   [WARN] {species}: No EPA data, using default uncertainty")
@@ -2292,7 +2630,16 @@ class MMFPMFAnalyzer:
         unc_data = self.uncertainty_data.copy()
         
         # Get corresponding datetime values
-        datetime_values = self.df.loc[self.concentration_data.index, 'datetime']
+        if hasattr(self.df.index, 'min') and hasattr(self.df.index, 'max'):
+            # Datetime is in the index - use index directly
+            datetime_values = self.df.loc[self.concentration_data.index].index
+        elif 'datetime' in self.df.columns:
+            # Legacy: datetime is a column
+            datetime_values = self.df.loc[self.concentration_data.index, 'datetime']
+        else:
+            # Fallback: use concentration data index as-is
+            datetime_values = self.concentration_data.index
+        
         conc_data.index = datetime_values
         unc_data.index = datetime_values
         
@@ -3119,8 +3466,11 @@ class MMFPMFAnalyzer:
             print(f"   [ERROR] Error creating relative factor profiles: {e}")
         
         try:
-            # Plot 2: Factor Contributions Time Series
+            # Plot 2: Factor Contributions Time Series with Complaint Overlay
             fig, ax = plt.subplots(figsize=(15, 8))
+            
+            # Load complaint data for overlay
+            complaint_data = self._load_complaint_data_for_overlay()
             
             # Get datetime index for plotting
             conc_file = self.output_dir / f"{self.filename_prefix}_concentrations.csv"
@@ -3168,10 +3518,79 @@ class MMFPMFAnalyzer:
                 
                 ax.set_xlabel('Sample Index')
             
-            ax.set_title(f'{station_display_name} PMF Factor Contributions Over Time', 
+            # Add complaint data overlay if available
+            if complaint_data is not None and has_datetime:
+                print(f"   [COMPLAINTS] Adding overlay to Factor Contributions plot")
+                try:
+                    # Create secondary y-axis for complaints (right side)
+                    ax_complaints = ax.twinx()
+                    
+                    # Plot complaints as bars
+                    valid_complaints = complaint_data.dropna()
+                    print(f"   [COMPLAINTS] Plotting {len(valid_complaints)} complaint data points")
+                    
+                    if len(valid_complaints) > 0:
+                        # Calculate max complaints for scaling
+                        max_complaints = valid_complaints.max()
+                        
+                        # Set up compressed scale using top 30% of plot area
+                        # Y-axis: 0-100, where 100 is top, 70 is bottom of complaint area
+                        plot_top = 100.0
+                        plot_complaint_bottom = 70.0  # Complaints use top 30% (70-100)
+                        
+                        # Scale complaint values to the compressed range (0 complaints = plot_top)
+                        # Higher complaint values extend down from the top
+                        scaled_heights = (valid_complaints / max_complaints) * (plot_top - plot_complaint_bottom)
+                        
+                        # Create hanging bars starting from top (plot_top) going down by scaled_heights
+                        bars = ax_complaints.bar(valid_complaints.index, 
+                                               scaled_heights,  # Bar heights (how far down from top)
+                                               bottom=plot_top - scaled_heights,  # Start position (top minus height)
+                                               alpha=0.7, color='red', width=pd.Timedelta(hours=18),
+                                               label='Daily Complaints', zorder=10)
+                        
+                        # Format the right y-axis for complaints
+                        ax_complaints.set_ylabel('Number of Complaints', color='red', fontweight='bold')
+                        ax_complaints.tick_params(axis='y', labelcolor='red', colors='red')
+                        ax_complaints.yaxis.label.set_color('red')
+                        
+                        # Ensure complaints y-axis is on the right and visible
+                        ax_complaints.yaxis.set_label_position('right')
+                        ax_complaints.yaxis.tick_right()
+                        
+                        # Set y-axis limits
+                        ax_complaints.set_ylim(0, 100)
+                        
+                        # Create custom y-tick labels - show actual complaint values
+                        # Ticks from top (0 complaints) down to max complaints
+                        import numpy as np
+                        n_ticks = 5
+                        # Create tick positions from plot_top down to plot_complaint_bottom
+                        tick_positions = np.linspace(plot_top, plot_complaint_bottom, n_ticks)
+                        # Convert positions to complaint values (0 at top, max at bottom)
+                        tick_labels = [f'{int(max_complaints * (plot_top - pos) / (plot_top - plot_complaint_bottom))}' 
+                                     for pos in tick_positions]
+                        ax_complaints.set_yticks(tick_positions)
+                        ax_complaints.set_yticklabels(tick_labels)
+                        
+                        # Add complaint legend
+                        complaint_legend = ax_complaints.legend(loc='upper right', frameon=True)
+                        complaint_legend.get_frame().set_facecolor('white')
+                        complaint_legend.get_frame().set_alpha(0.8)
+                        
+                        print(f"   [COMPLAINTS] Successfully added overlay: {len(valid_complaints)} days with complaints")
+                        
+                        # Highlight non-zero complaint days
+                        non_zero_complaints = valid_complaints[valid_complaints > 0]
+                        print(f"   [COMPLAINTS] Non-zero complaint days: {len(non_zero_complaints)}")
+                    
+                except Exception as e:
+                    print(f"   [WARN] Could not add complaint overlay: {e}")
+            
+            ax.set_title(f'{station_display_name} PMF Factor Contributions Over Time with Complaints', 
                         fontsize=14, fontweight='bold')
             ax.set_ylabel('Contribution')
-            ax.legend()
+            ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
             ax.grid(True, alpha=0.3)
             
             plt.tight_layout()
@@ -3183,6 +3602,648 @@ class MMFPMFAnalyzer:
             
         except Exception as e:
             print(f"   [ERROR] Error creating factor contributions: {e}")
+        
+        # Plot 2b: H2S & CH4 Concentrations with Complaint Time Series - Include excluded species
+        # Always try to show both H2S and CH4, even if excluded from PMF analysis
+        available_species = []
+        
+        # Load concentration data from PMF analysis
+        conc_file = self.output_dir / f"{self.filename_prefix}_concentrations.csv"
+        conc_data = pd.read_csv(conc_file, index_col=0)
+        datetime_index = pd.to_datetime(conc_data.index)
+        
+        # Extended data container for plotting (includes excluded species)
+        extended_conc_data = conc_data.copy()
+        
+        # Check for H2S availability in PMF data
+        if 'H2S' in conc_data.columns:
+            available_species.append('H2S')
+        elif 'H2S' in self.df.columns:
+            # H2S was excluded from PMF but exists in original data
+            try:
+                df_indexed = self.df.set_index('datetime')
+                h2s_original = df_indexed['H2S'].reindex(datetime_index, method='nearest', tolerance=pd.Timedelta('1H'))
+                if h2s_original.notna().sum() > len(h2s_original) * 0.5:  # At least 50% data available
+                    extended_conc_data['H2S'] = h2s_original
+                    available_species.append('H2S')
+                    print(f"   [H2S] Loading excluded H2S from original data for visualization ({h2s_original.notna().sum()}/{len(h2s_original)} valid points)")
+            except Exception as e:
+                print(f"   [WARN] Could not load excluded H2S: {e}")
+        
+        # Check for CH4 availability in PMF data, or load from original if excluded
+        if 'CH4' in conc_data.columns:
+            available_species.append('CH4')
+        elif 'CH4' in self.df.columns:
+            # CH4 was excluded from PMF but exists in original data
+            try:
+                df_indexed = self.df.set_index('datetime')
+                ch4_original = df_indexed['CH4'].reindex(datetime_index, method='nearest', tolerance=pd.Timedelta('1H'))
+                if ch4_original.notna().sum() > len(ch4_original) * 0.5:  # At least 50% data available
+                    extended_conc_data['CH4'] = ch4_original
+                    available_species.append('CH4')
+                    print(f"   [CH4] Loading excluded CH4 from original data for visualization ({ch4_original.notna().sum()}/{len(ch4_original)} valid points)")
+            except Exception as e:
+                print(f"   [WARN] Could not load excluded CH4: {e}")
+        
+        if not available_species:
+            print("   [SKIP] No H2S or CH4 data available for concentration plot")
+        else:
+            species_names = ' & '.join(available_species)
+            print(f"   [PLOT] Creating {species_names} concentrations plot...")
+            fig, ax = plt.subplots(figsize=(15, 8))
+            
+            # Plot H2S if available
+            if 'H2S' in available_species:
+                h2s_concentrations = extended_conc_data['H2S']
+                h2s_min, h2s_max = h2s_concentrations.min(), h2s_concentrations.max()
+                h2s_normalized = (h2s_concentrations - h2s_min) / (h2s_max - h2s_min)
+                ax.plot(datetime_index, h2s_normalized, 
+                       color='darkgreen', linewidth=2, alpha=0.8, 
+                       label=f'H2S Normalized ({h2s_min:.1f}-{h2s_max:.1f} ppb)')
+                print(f"   [H2S] Plotted H2S: {h2s_min:.2f} to {h2s_max:.2f} ppb")
+            
+            # Plot CH4 if available
+            if 'CH4' in available_species:
+                ch4_concentrations = extended_conc_data['CH4']
+                ch4_min, ch4_max = ch4_concentrations.min(), ch4_concentrations.max()
+                ch4_normalized = (ch4_concentrations - ch4_min) / (ch4_max - ch4_min)
+                ax.plot(datetime_index, ch4_normalized, 
+                       color='blue', linewidth=3, alpha=0.9, 
+                       label=f'CH4 Normalized ({ch4_min:.0f}-{ch4_max:.0f} ppm)', marker='o', markersize=2)
+                print(f"   [CH4] Plotted CH4: {ch4_min:.2f} to {ch4_max:.2f} ppm")
+            
+            # Format x-axis
+            ax.set_xlabel('Date/Time')
+            import matplotlib.dates as mdates
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d\n%H:%M'))
+            ax.xaxis.set_major_locator(mdates.AutoDateLocator())
+            plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
+            
+            # Add complaint overlay
+            complaint_data = self._load_complaint_data_for_overlay()
+            if complaint_data is not None:
+                ax_complaints = ax.twinx()
+                valid_complaints = complaint_data.dropna()
+                if len(valid_complaints) > 0:
+                    ax_complaints.plot(valid_complaints.index, valid_complaints.values, 
+                                     color='red', linewidth=2, alpha=0.8, 
+                                     label='Daily Complaints', marker='s', markersize=4)
+                    ax_complaints.set_ylabel('Number of Complaints', color='red', fontweight='bold')
+                    ax_complaints.tick_params(axis='y', labelcolor='red', colors='red')
+                    ax_complaints.yaxis.set_label_position('right')
+                    ax_complaints.yaxis.tick_right()
+                    ax_complaints.set_ylim(0, valid_complaints.max() * 1.1)
+                    complaint_legend = ax_complaints.legend(loc='upper right', frameon=True)
+                    complaint_legend.get_frame().set_facecolor('white')
+                    complaint_legend.get_frame().set_alpha(0.8)
+                    print(f"   [COMPLAINTS] Added complaint overlay: {len(valid_complaints)} days")
+            
+            # Set axis properties
+            ax.set_ylim(0, 1.1)
+            station_display_name = self._get_station_display_name()
+            # Dynamic title based on available species
+            ax.set_title(f'{station_display_name} Normalized {species_names} Concentrations with Complaint Events', 
+                        fontsize=14, fontweight='bold')
+            ax.set_ylabel('Normalized Concentration (0-1)', fontsize=12)
+            ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+            ax.grid(True, alpha=0.4)
+            ax.minorticks_on()
+            
+            # Add daily vertical reference lines
+            start_date = datetime_index.min()
+            end_date = datetime_index.max()
+            daily_dates = pd.date_range(start_date.date(), end_date.date(), freq='D')
+            for date in daily_dates:
+                ax.axvline(x=date, color='lightgray', alpha=0.5, linewidth=0.8, linestyle='-')
+            
+            plt.tight_layout()
+            
+            # Save plot - dynamic filename based on available species
+            species_filename = '_'.join([s.lower() for s in available_species])
+            plot_path = dashboard_dir / f"{self.filename_prefix}_{species_filename}_concentrations.png"
+            plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
+            plt.close()
+            plot_files.append(plot_path)
+            print(f"   [OK] Saved: {species_filename}_concentrations.png")
+        
+        try:
+            # Plot 2c: Correlation Table - Factors/Species vs Complaints
+            print("   [CORR] Creating complaint correlation analysis...")
+            
+            # Load complaint data for correlation analysis
+            complaint_data = self._load_complaint_data_for_overlay()
+            
+            if complaint_data is not None:
+                # Get daily averages for factors (G_contributions)
+                conc_file = self.output_dir / f"{self.filename_prefix}_concentrations.csv"
+                conc_data = pd.read_csv(conc_file, index_col=0)
+                conc_data.index = pd.to_datetime(conc_data.index)
+                
+                # Create extended concentration data for correlation analysis (includes excluded species)
+                extended_conc_data_corr = conc_data.copy()
+                
+                # Add excluded species from original data for correlation analysis
+                datetime_index_corr = pd.to_datetime(conc_data.index)
+                
+                # Add CH4 if it was excluded but exists in original data
+                if 'CH4' not in conc_data.columns and 'CH4' in self.df.columns:
+                    try:
+                        # Create a properly indexed original data series for alignment
+                        df_indexed = self.df.set_index('datetime')
+                        # Use reindex to align with concentration data index, forward fill gaps
+                        ch4_original = df_indexed['CH4'].reindex(datetime_index_corr, method='nearest', tolerance=pd.Timedelta('1H'))
+                        # Only add if we have sufficient data
+                        if ch4_original.notna().sum() > len(ch4_original) * 0.5:  # At least 50% data available
+                            extended_conc_data_corr['CH4'] = ch4_original
+                            print(f"   [CORR] Including excluded CH4 in correlation analysis ({ch4_original.notna().sum()}/{len(ch4_original)} valid points)")
+                        else:
+                            print(f"   [CORR] Insufficient CH4 data for correlation analysis ({ch4_original.notna().sum()}/{len(ch4_original)} valid points)")
+                    except Exception as e:
+                        print(f"   [WARN] Could not include CH4 in correlation analysis: {e}")
+                
+                # Add H2S if it was excluded but exists in original data
+                if 'H2S' not in conc_data.columns and 'H2S' in self.df.columns:
+                    try:
+                        # Create a properly indexed original data series for alignment
+                        df_indexed = self.df.set_index('datetime')
+                        # Use reindex to align with concentration data index, forward fill gaps
+                        h2s_original = df_indexed['H2S'].reindex(datetime_index_corr, method='nearest', tolerance=pd.Timedelta('1H'))
+                        # Only add if we have sufficient data
+                        if h2s_original.notna().sum() > len(h2s_original) * 0.5:  # At least 50% data available
+                            extended_conc_data_corr['H2S'] = h2s_original
+                            print(f"   [CORR] Including excluded H2S in correlation analysis ({h2s_original.notna().sum()}/{len(h2s_original)} valid points)")
+                        else:
+                            print(f"   [CORR] Insufficient H2S data for correlation analysis ({h2s_original.notna().sum()}/{len(h2s_original)} valid points)")
+                    except Exception as e:
+                        print(f"   [WARN] Could not include H2S in correlation analysis: {e}")
+                
+                # Apply complaint correlation time window logic
+                valid_complaints = complaint_data.dropna()
+                
+                print(f"   [CORR] Complaint correlation window: ±{self.complaint_correlation_hours} hours")
+                
+                if self.complaint_correlation_hours == 0:
+                    # Original behavior: use daily aggregation
+                    daily_concentrations = extended_conc_data_corr.resample('D').mean()
+                    daily_concentrations_std = extended_conc_data_corr.resample('D').std()
+                    
+                    # Load factor contributions and aggregate to daily averages
+                    factor_contribs_file = self.output_dir / f"{self.filename_prefix}_factor_contributions.csv"
+                    if factor_contribs_file.exists():
+                        factor_data = pd.read_csv(factor_contribs_file, index_col=0)
+                        factor_data.index = pd.to_datetime(factor_data.index)
+                        daily_factors = factor_data.resample('D').mean()
+                        daily_factors_std = factor_data.resample('D').std()
+                    else:
+                        # Fallback: create daily factors from G_contributions
+                        datetime_index = pd.to_datetime(conc_data.index)
+                        factor_df = pd.DataFrame(G_contributions, index=datetime_index,
+                                               columns=[f'Factor_{i+1}' for i in range(self.factors)])
+                        daily_factors = factor_df.resample('D').mean()
+                        daily_factors_std = factor_df.resample('D').std()
+                else:
+                    # New behavior: use time windows around complaints
+                    print(f"   [CORR] Using windowed correlation: ±{self.complaint_correlation_hours}h around each complaint")
+                    print(f"   [CORR] Aggregation method: {self.complaint_window_method}")
+                    
+                    # Load factor contributions for windowing
+                    factor_contribs_file = self.output_dir / f"{self.filename_prefix}_factor_contributions.csv"
+                    if factor_contribs_file.exists():
+                        factor_data = pd.read_csv(factor_contribs_file, index_col=0)
+                        factor_data.index = pd.to_datetime(factor_data.index)
+                    else:
+                        # Fallback: create factor data from G_contributions
+                        datetime_index = pd.to_datetime(conc_data.index)
+                        factor_data = pd.DataFrame(G_contributions, index=datetime_index,
+                                                 columns=[f'Factor_{i+1}' for i in range(self.factors)])
+                    
+                    # Create windowed averages and standard deviations for each complaint day
+                    windowed_concentrations = []
+                    windowed_factors = []
+                    windowed_concentrations_std = []
+                    windowed_factors_std = []
+                    windowed_complaint_dates = []
+                    
+                    for complaint_date, complaint_count in valid_complaints.items():
+                        if complaint_count > 0:  # Only process days with complaints
+                            # Define time window around complaint date (assuming complaints occur at noon)
+                            center_time = pd.Timestamp(complaint_date.date()) + pd.Timedelta(hours=12)
+                            window_start = center_time - pd.Timedelta(hours=self.complaint_correlation_hours)
+                            window_end = center_time + pd.Timedelta(hours=self.complaint_correlation_hours)
+                            
+                            # Extract concentration data within window
+                            conc_window = extended_conc_data_corr[
+                                (extended_conc_data_corr.index >= window_start) & 
+                                (extended_conc_data_corr.index <= window_end)
+                            ]
+                            
+                            # Extract factor data within window
+                            factor_window = factor_data[
+                                (factor_data.index >= window_start) & 
+                                (factor_data.index <= window_end)
+                            ]
+                            
+                            # Calculate aggregation and uncertainties for the window (if data exists)
+                            if len(conc_window) > 0:
+                                # Apply selected aggregation method
+                                conc_aggregated = self._aggregate_window_data(conc_window, self.complaint_window_method)
+                                factor_aggregated = self._aggregate_window_data(factor_window, self.complaint_window_method)
+                                
+                                # Calculate appropriate uncertainty measures
+                                conc_uncertainty = self._calculate_window_uncertainty(conc_window, conc_aggregated, self.complaint_window_method)
+                                factor_uncertainty = self._calculate_window_uncertainty(factor_window, factor_aggregated, self.complaint_window_method)
+                                
+                                windowed_concentrations.append(conc_aggregated)
+                                windowed_factors.append(factor_aggregated)
+                                windowed_concentrations_std.append(conc_uncertainty)
+                                windowed_factors_std.append(factor_uncertainty)
+                                windowed_complaint_dates.append(complaint_date)
+                    
+                    # Convert to DataFrames with proper indexing
+                    if windowed_concentrations:
+                        daily_concentrations = pd.DataFrame(windowed_concentrations, index=windowed_complaint_dates)
+                        daily_factors = pd.DataFrame(windowed_factors, index=windowed_complaint_dates)
+                        daily_concentrations_std = pd.DataFrame(windowed_concentrations_std, index=windowed_complaint_dates)
+                        daily_factors_std = pd.DataFrame(windowed_factors_std, index=windowed_complaint_dates)
+                        print(f"   [CORR] Generated {len(daily_concentrations)} windowed correlation points using '{self.complaint_window_method}' aggregation with uncertainties")
+                    else:
+                        print(f"   [WARN] No valid windowed data found for correlation analysis")
+                        daily_concentrations = pd.DataFrame()
+                        daily_factors = pd.DataFrame()
+                        daily_concentrations_std = pd.DataFrame()
+                        daily_factors_std = pd.DataFrame()
+                
+                # Align data by date and calculate correlations
+                
+                correlations = {}
+                
+                # Calculate factor correlations
+                print(f"   [CORR] Calculating factor correlations...")
+                for factor_col in daily_factors.columns:
+                    # Align dates between factors and complaints
+                    aligned_data = pd.concat([daily_factors[factor_col], valid_complaints], 
+                                           axis=1, join='inner')
+                    aligned_data.columns = ['factor_value', 'complaints']
+                    
+                    if len(aligned_data) > 1:
+                        correlation = aligned_data['factor_value'].corr(aligned_data['complaints'])
+                        correlations[factor_col] = correlation
+                    else:
+                        correlations[factor_col] = float('nan')
+                
+                # Calculate species correlations
+                print(f"   [CORR] Calculating species correlations...")
+                for species in daily_concentrations.columns:
+                    # Align dates between species and complaints
+                    aligned_data = pd.concat([daily_concentrations[species], valid_complaints], 
+                                           axis=1, join='inner')
+                    aligned_data.columns = ['species_value', 'complaints']
+                    
+                    if len(aligned_data) > 1:
+                        correlation = aligned_data['species_value'].corr(aligned_data['complaints'])
+                        correlations[f'{species}_Species'] = correlation
+                    else:
+                        correlations[f'{species}_Species'] = float('nan')
+                
+                # Create correlation table visualization
+                # matplotlib.pyplot as plt already imported at module level
+                import numpy as np
+                
+                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 8))
+                
+                # Separate factor and species correlations
+                factor_corrs = {k: v for k, v in correlations.items() if 'Factor_' in k}
+                species_corrs = {k.replace('_Species', ''): v for k, v in correlations.items() if '_Species' in k}
+                
+                # Plot 1: Factor correlations
+                if factor_corrs:
+                    factor_names = list(factor_corrs.keys())
+                    factor_values = [factor_corrs[name] for name in factor_names]
+                    
+                    # Color bars by correlation strength
+                    colors = ['red' if v < -0.3 else 'blue' if v > 0.3 else 'gray' for v in factor_values]
+                    
+                    bars1 = ax1.bar(range(len(factor_names)), factor_values, color=colors, alpha=0.7)
+                    
+                    # Dynamic title based on correlation mode
+                    if self.complaint_correlation_hours == 0:
+                        title1 = 'PMF Factors vs Daily Complaints\nCorrelation Analysis (Daily Aggregation)'
+                    else:
+                        title1 = f'PMF Factors vs Complaints\nCorrelation Analysis (±{self.complaint_correlation_hours}h {self.complaint_window_method.title()} Windows)'
+                    ax1.set_title(title1, fontweight='bold')
+                    ax1.set_xlabel('PMF Factors')
+                    ax1.set_ylabel('Pearson Correlation Coefficient')
+                    ax1.set_xticks(range(len(factor_names)))
+                    ax1.set_xticklabels([f'F{i+1}' for i in range(len(factor_names))], rotation=0)
+                    ax1.grid(True, alpha=0.3)
+                    ax1.axhline(y=0, color='black', linestyle='-', alpha=0.5)
+                    ax1.set_ylim(-1, 1)
+                    
+                    # Add correlation values as text on bars
+                    for i, (bar, val) in enumerate(zip(bars1, factor_values)):
+                        height = bar.get_height()
+                        ax1.text(bar.get_x() + bar.get_width()/2., height + (0.02 if height >= 0 else -0.05),
+                                f'{val:.3f}', ha='center', va='bottom' if height >= 0 else 'top', 
+                                fontsize=9, fontweight='bold')
+                
+                # Plot 2: Species correlations
+                if species_corrs:
+                    species_names = list(species_corrs.keys())
+                    species_values = [species_corrs[name] for name in species_names]
+                    
+                    # Color bars by correlation strength
+                    colors = ['red' if v < -0.3 else 'blue' if v > 0.3 else 'gray' for v in species_values]
+                    
+                    bars2 = ax2.bar(range(len(species_names)), species_values, color=colors, alpha=0.7)
+                    
+                    # Dynamic title based on correlation mode
+                    if self.complaint_correlation_hours == 0:
+                        title2 = 'Chemical Species vs Daily Complaints\nCorrelation Analysis (Daily Aggregation)'
+                    else:
+                        title2 = f'Chemical Species vs Complaints\nCorrelation Analysis (±{self.complaint_correlation_hours}h {self.complaint_window_method.title()} Windows)'
+                    ax2.set_title(title2, fontweight='bold')
+                    ax2.set_xlabel('Chemical Species')
+                    ax2.set_ylabel('Pearson Correlation Coefficient')
+                    ax2.set_xticks(range(len(species_names)))
+                    ax2.set_xticklabels(species_names, rotation=45, ha='right')
+                    ax2.grid(True, alpha=0.3)
+                    ax2.axhline(y=0, color='black', linestyle='-', alpha=0.5)
+                    ax2.set_ylim(-1, 1)
+                    
+                    # Add correlation values as text on bars
+                    for i, (bar, val) in enumerate(zip(bars2, species_values)):
+                        height = bar.get_height()
+                        ax2.text(bar.get_x() + bar.get_width()/2., height + (0.02 if height >= 0 else -0.05),
+                                f'{val:.3f}', ha='center', va='bottom' if height >= 0 else 'top', 
+                                fontsize=9, fontweight='bold')
+                
+                plt.tight_layout()
+                plot_path = dashboard_dir / f"{self.filename_prefix}_complaint_correlations.png"
+                plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
+                plt.close()
+                plot_files.append(plot_path)
+                
+                # CREATE SCATTERPLOTS: Species/Factor Values vs Complaints
+                print(f"   [CORR] Creating scatterplots for species and factors vs complaints...")
+                
+                # Get top correlated variables (both positive and negative) for scatterplots
+                all_correlations = list(correlations.items())
+                sorted_correlations = sorted(all_correlations, key=lambda x: abs(x[1]), reverse=True)
+                top_correlations = [item for item in sorted_correlations if not pd.isna(item[1])][:12]  # Top 12 for 3x4 grid
+                
+                if len(top_correlations) > 0:
+                    # Create scatterplot figure
+                    n_plots = len(top_correlations)
+                    n_cols = 4
+                    n_rows = max(1, (n_plots + n_cols - 1) // n_cols)
+                    
+                    fig, axes = plt.subplots(n_rows, n_cols, figsize=(16, 4*n_rows))
+                    if n_rows == 1:
+                        axes = axes.reshape(1, -1) if n_plots > 1 else [[axes]]
+                    
+                    for idx, (var_name, correlation) in enumerate(top_correlations):
+                        row = idx // n_cols
+                        col = idx % n_cols
+                        ax = axes[row, col]
+                        
+                        # Determine if it's a factor or species
+                        if 'Factor_' in var_name:
+                            # Factor scatterplot
+                            factor_col = var_name
+                            if factor_col in daily_factors.columns:
+                                # Align dates between factors and complaints
+                                aligned_data = pd.concat([daily_factors[factor_col], valid_complaints], 
+                                                       axis=1, join='inner')
+                                aligned_data.columns = ['factor_value', 'complaints']
+                                
+                                if len(aligned_data) > 1:
+                                    x_values = aligned_data['factor_value']
+                                    y_values = aligned_data['complaints']
+                                    
+                                    # Get standard deviations for error bars
+                                    if factor_col in daily_factors_std.columns:
+                                        # Align standard deviations with the same dates
+                                        aligned_std = daily_factors_std[factor_col].reindex(aligned_data.index)
+                                        # Use small non-zero value for missing/zero std to ensure error bars are visible
+                                        x_errors = aligned_std.fillna(x_values.std() * 0.01)  # Use 1% of data std for missing values
+                                        x_errors = x_errors.replace(0, x_values.std() * 0.01)  # Replace zeros too
+                                    else:
+                                        x_errors = None
+                                    
+                                    # Color points by correlation strength
+                                    color = 'blue' if correlation > 0.3 else 'red' if correlation < -0.3 else 'gray'
+                                    
+                                    # Use errorbar instead of scatter to show error bars
+                                    if x_errors is not None:
+                                        ax.errorbar(x_values, y_values, xerr=x_errors, fmt='o', 
+                                                   alpha=0.6, color=color, markersize=5, 
+                                                   ecolor='lightgray', capsize=2, capthick=1)
+                                    else:
+                                        ax.scatter(x_values, y_values, alpha=0.6, color=color, s=30)
+                                    
+                                    # Calculate psychometric sigmoid metrics
+                                    print(f"   [PSYCHOMETRIC] Calculating sigmoid fit for {factor_col}: {len(x_values)} samples")
+                                    psychometric_metrics = calculate_psychometric_fit(x_values, y_values)
+                                    
+                                    title_text = f'{factor_col} vs Complaints\nr = {correlation:.3f}'
+                                    
+                                    if psychometric_metrics is not None:
+                                        print(f"   [PSYCHOMETRIC] {factor_col}: R²={psychometric_metrics['r_squared']:.3f}, Threshold={psychometric_metrics['parameters']['x50_threshold']:.3f} μg/m³")
+                                        
+                                        # Plot psychometric sigmoid curve
+                                        sigmoid_color = 'darkgreen' if psychometric_metrics['r_squared'] > 0.7 else 'orange'
+                                        
+                                        # Plot the fitted sigmoid curve
+                                        ax.plot(psychometric_metrics['sigmoid_x'], 
+                                               psychometric_metrics['sigmoid_y'],
+                                               '-', alpha=0.8, color=sigmoid_color, linewidth=3, 
+                                               label='Psychometric Sigmoid')
+                                        
+                                        # Add threshold markers
+                                        threshold_50 = psychometric_metrics['parameters']['x50_threshold']
+                                        ymax = psychometric_metrics['parameters']['ymax']
+                                        ax.axvline(x=threshold_50, color=sigmoid_color, linestyle='--', alpha=0.6, 
+                                                  label=f'50% Threshold ({threshold_50:.2f})')
+                                        ax.axhline(y=ymax/2, color=sigmoid_color, linestyle=':', alpha=0.6)
+                                        
+                                        # Add metrics to title
+                                        title_text += f'\nR²={psychometric_metrics["r_squared"]:.3f}'  
+                                        title_text += f', Threshold={threshold_50:.2f} μg/m³'
+                                        
+                                        # Add legend
+                                        ax.legend(fontsize=8)
+                                    else:
+                                        print(f"   [PSYCHOMETRIC] {factor_col}: No sigmoid fit (insufficient data or poor fit)")
+                                    
+                                    # Add linear trend line for comparison if correlation is strong
+                                    if abs(correlation) > 0.3:
+                                        try:
+                                            z = np.polyfit(x_values, y_values, 1)
+                                            p = np.poly1d(z)
+                                            x_line = np.linspace(x_values.min(), x_values.max(), 100)
+                                            ax.plot(x_line, p(x_line), "--", alpha=0.5, color='gray', linewidth=1, label='Linear')
+                                        except np.linalg.LinAlgError:
+                                            pass
+                                    
+                                    ax.set_xlabel(f'{factor_col} (μg/m³)')
+                                    ax.set_ylabel('Daily Complaints')
+                                    ax.set_title(title_text, fontsize=9, fontweight='bold')
+                                    ax.grid(True, alpha=0.3)
+                        
+                        elif '_Species' in var_name:
+                            # Species scatterplot
+                            species_name = var_name.replace('_Species', '')
+                            if species_name in daily_concentrations.columns:
+                                # Align dates between species and complaints
+                                aligned_data = pd.concat([daily_concentrations[species_name], valid_complaints], 
+                                                       axis=1, join='inner')
+                                aligned_data.columns = ['species_value', 'complaints']
+                                
+                                if len(aligned_data) > 1:
+                                    x_values = aligned_data['species_value']
+                                    y_values = aligned_data['complaints']
+                                    
+                                    # Get standard deviations for error bars
+                                    if species_name in daily_concentrations_std.columns:
+                                        # Align standard deviations with the same dates
+                                        aligned_std = daily_concentrations_std[species_name].reindex(aligned_data.index)
+                                        # Use small non-zero value for missing/zero std to ensure error bars are visible
+                                        x_errors = aligned_std.fillna(x_values.std() * 0.01)  # Use 1% of data std for missing values
+                                        x_errors = x_errors.replace(0, x_values.std() * 0.01)  # Replace zeros too
+                                    else:
+                                        x_errors = None
+                                    
+                                    # Color points by correlation strength
+                                    color = 'blue' if correlation > 0.3 else 'red' if correlation < -0.3 else 'gray'
+                                    
+                                    # Use errorbar instead of scatter to show error bars
+                                    if x_errors is not None:
+                                        ax.errorbar(x_values, y_values, xerr=x_errors, fmt='o', 
+                                                   alpha=0.6, color=color, markersize=5, 
+                                                   ecolor='lightgray', capsize=2, capthick=1)
+                                    else:
+                                        ax.scatter(x_values, y_values, alpha=0.6, color=color, s=30)
+                                    
+                                    # Calculate psychometric sigmoid metrics
+                                    print(f"   [PSYCHOMETRIC] Calculating sigmoid fit for {species_name}: {len(x_values)} samples")
+                                    psychometric_metrics = calculate_psychometric_fit(x_values, y_values)
+                                    
+                                    title_text = f'{species_name} vs Complaints\nr = {correlation:.3f}'
+                                    
+                                    if psychometric_metrics is not None:
+                                        print(f"   [PSYCHOMETRIC] {species_name}: R²={psychometric_metrics['r_squared']:.3f}, Threshold={psychometric_metrics['parameters']['x50_threshold']:.3f} μg/m³")
+                                        
+                                        # Plot psychometric sigmoid curve
+                                        sigmoid_color = 'darkgreen' if psychometric_metrics['r_squared'] > 0.7 else 'orange'
+                                        
+                                        # Plot the fitted sigmoid curve
+                                        ax.plot(psychometric_metrics['sigmoid_x'], 
+                                               psychometric_metrics['sigmoid_y'],
+                                               '-', alpha=0.8, color=sigmoid_color, linewidth=3, 
+                                               label='Psychometric Sigmoid')
+                                        
+                                        # Add threshold markers
+                                        threshold_50 = psychometric_metrics['parameters']['x50_threshold']
+                                        ymax = psychometric_metrics['parameters']['ymax']
+                                        ax.axvline(x=threshold_50, color=sigmoid_color, linestyle='--', alpha=0.6, 
+                                                  label=f'50% Threshold ({threshold_50:.2f})')
+                                        ax.axhline(y=ymax/2, color=sigmoid_color, linestyle=':', alpha=0.6)
+                                        
+                                        # Add metrics to title
+                                        title_text += f'\nR²={psychometric_metrics["r_squared"]:.3f}'  
+                                        title_text += f', Threshold={threshold_50:.2f} μg/m³'
+                                        
+                                        # Add legend
+                                        ax.legend(fontsize=8)
+                                    else:
+                                        print(f"   [PSYCHOMETRIC] {species_name}: No sigmoid fit (insufficient data or poor fit)")
+                                    
+                                    # Add linear trend line for comparison if correlation is strong
+                                    if abs(correlation) > 0.3:
+                                        try:
+                                            z = np.polyfit(x_values, y_values, 1)
+                                            p = np.poly1d(z)
+                                            x_line = np.linspace(x_values.min(), x_values.max(), 100)
+                                            ax.plot(x_line, p(x_line), "--", alpha=0.5, color='gray', linewidth=1, label='Linear')
+                                        except np.linalg.LinAlgError:
+                                            pass
+                                    
+                                    ax.set_xlabel(f'{species_name} (μg/m³)')
+                                    ax.set_ylabel('Daily Complaints')
+                                    ax.set_title(title_text, fontsize=9, fontweight='bold')
+                                    ax.grid(True, alpha=0.3)
+                    
+                    # Hide unused subplots
+                    for idx in range(len(top_correlations), n_rows * n_cols):
+                        row = idx // n_cols
+                        col = idx % n_cols
+                        axes[row, col].set_visible(False)
+                    
+                    # Add overall title based on correlation window mode
+                    if self.complaint_correlation_hours == 0:
+                        fig.suptitle(f'Species & Factor Values vs Daily Complaints\nScatterplot Analysis (Daily Aggregation)', 
+                                   fontsize=14, fontweight='bold', y=0.98)
+                    else:
+                        fig.suptitle(f'Species & Factor Values vs Complaints\nScatterplot Analysis (±{self.complaint_correlation_hours}h {self.complaint_window_method.title()} Windows)', 
+                                   fontsize=14, fontweight='bold', y=0.98)
+                    
+                    plt.tight_layout()
+                    scatter_plot_path = dashboard_dir / f"{self.filename_prefix}_complaint_scatterplots.png"
+                    plt.savefig(scatter_plot_path, dpi=300, bbox_inches='tight', facecolor='white')
+                    plt.close()
+                    plot_files.append(scatter_plot_path)
+                    print(f"   [OK] Saved: complaint_scatterplots.png ({len(top_correlations)} plots)")
+                
+                # Save correlation results to CSV
+                corr_df = pd.DataFrame(list(correlations.items()), columns=['Variable', 'Correlation_with_Complaints'])
+                corr_df = corr_df.sort_values('Correlation_with_Complaints', key=abs, ascending=False)
+                
+                corr_csv_path = self.output_dir / f"{self.filename_prefix}_complaint_correlations.csv"
+                corr_df.to_csv(corr_csv_path, index=False)
+                
+                print(f"   [OK] Saved: complaint_correlations.png")
+                print(f"   [OK] Saved: complaint_correlations.csv")
+                
+                # Print top correlations
+                print(f"   [CORR] Top positive correlations:")
+                positive_corrs = corr_df[corr_df['Correlation_with_Complaints'] > 0].head(3)
+                for _, row in positive_corrs.iterrows():
+                    print(f"     {row['Variable']}: {row['Correlation_with_Complaints']:.3f}")
+                
+                print(f"   [CORR] Top negative correlations:")
+                negative_corrs = corr_df[corr_df['Correlation_with_Complaints'] < 0].head(3)
+                for _, row in negative_corrs.iterrows():
+                    print(f"     {row['Variable']}: {row['Correlation_with_Complaints']:.3f}")
+                
+                # Print psychometric sigmoid fit metrics for top correlations
+                print(f"   [PSYCHOMETRIC] Psychometric sigmoid fit metrics:")
+                for var_name, correlation in top_correlations[:5]:  # Top 5 variables
+                    if 'Factor_' in var_name:
+                        factor_col = var_name
+                        if factor_col in daily_factors.columns:
+                            aligned_data = pd.concat([daily_factors[factor_col], valid_complaints], axis=1, join='inner')
+                            if len(aligned_data) > 1:
+                                psychometric_metrics = calculate_psychometric_fit(aligned_data.iloc[:, 0], aligned_data.iloc[:, 1])
+                                if psychometric_metrics is not None:
+                                    print(f"     {var_name}: R²={psychometric_metrics['r_squared']:.3f}, "
+                                          f"Threshold={psychometric_metrics['parameters']['x50_threshold']:.3f} μg/m³, "
+                                          f"Max Response={psychometric_metrics['parameters']['ymax']:.1f}")
+                    elif '_Species' in var_name:
+                        species_name = var_name.replace('_Species', '')
+                        if species_name in daily_concentrations.columns:
+                            aligned_data = pd.concat([daily_concentrations[species_name], valid_complaints], axis=1, join='inner')
+                            if len(aligned_data) > 1:
+                                psychometric_metrics = calculate_psychometric_fit(aligned_data.iloc[:, 0], aligned_data.iloc[:, 1])
+                                if psychometric_metrics is not None:
+                                    print(f"     {var_name}: R²={psychometric_metrics['r_squared']:.3f}, "
+                                          f"Threshold={psychometric_metrics['parameters']['x50_threshold']:.3f} μg/m³, "
+                                          f"Max Response={psychometric_metrics['parameters']['ymax']:.1f}")
+            
+            else:
+                print(f"   [INFO] No complaint data available for correlation analysis")
+            
+        except Exception as e:
+            print(f"   [ERROR] Error creating complaint correlation analysis: {e}")
         
         try:
             # Plot 3: Species Composition (Stacked Bar)
@@ -3623,6 +4684,9 @@ class MMFPMFAnalyzer:
             'bootstrap_keep_h': getattr(self, 'bootstrap_keep_h', True),
             'bootstrap_reuse_seed': getattr(self, 'bootstrap_reuse_seed', True),
             'bootstrap_overlapping': getattr(self, 'bootstrap_overlapping', False),
+            
+            # Complaint correlation analysis parameters
+            'complaint_correlation_hours': getattr(self, 'complaint_correlation_hours', 0),
         }
         
         html_section = """
@@ -3724,6 +4788,10 @@ class MMFPMFAnalyzer:
                 cmd_parts.append('--no-bootstrap-reuse-seed')
             if cli_params['bootstrap_overlapping']:
                 cmd_parts.append('--bootstrap-overlapping')
+        
+        # Add complaint correlation parameters
+        if cli_params['complaint_correlation_hours'] != 0:
+            cmd_parts.append(f"--complaint-correlation-hours {cli_params['complaint_correlation_hours']}")
         
         # Add help detail flag if enabled  
         if cli_params['help_detail']:
@@ -3845,6 +4913,9 @@ class MMFPMFAnalyzer:
             'bootstrap_keep_h': (cli_params.get('bootstrap_keep_h', True), 'Keep factor profiles (H matrix) from bootstrap samples'),
             'bootstrap_reuse_seed': (cli_params.get('bootstrap_reuse_seed', True), 'Reuse seed across bootstrap samples'),
             'bootstrap_overlapping': (cli_params.get('bootstrap_overlapping', False), 'Allow overlapping blocks in bootstrap resampling'),
+            
+            # Complaint correlation analysis parameters
+            'complaint_correlation_hours': (cli_params.get('complaint_correlation_hours', 0), 'Time window in hours for complaint correlation analysis (0 = daily aggregation)'),
         }
         
         # Add species weighting if any applied
@@ -4575,9 +5646,59 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         plot_files.append(plot_path)
         print(f"   [OK] Saved: source_contribution_analysis.png")
     
+    def _load_complaint_data_for_overlay(self):
+        """Load complaint data from parquet file for overlay plots."""
+        try:
+            from mmf_config import get_mmf_parquet_file
+            
+            # Get the parquet file path (using test data)
+            parquet_file = get_mmf_parquet_file(self.station, use_test_data=True)
+            
+            # Load the full parquet data
+            full_data = pd.read_parquet(parquet_file)
+            
+            # Check if complaint data exists
+            if 'Odour_Reports' not in full_data.columns:
+                print("   [INFO] No complaint data available for overlay")
+                return None
+            
+            # Convert datetime column to proper index
+            full_data['datetime'] = pd.to_datetime(full_data['datetime'])
+            full_data = full_data.set_index('datetime')
+            
+            # Filter to the analysis time period
+            if hasattr(self, 'start_date') and hasattr(self, 'end_date'):
+                start_date = pd.to_datetime(self.start_date)
+                end_date = pd.to_datetime(self.end_date)
+                period_data = full_data[(full_data.index >= start_date) & (full_data.index <= end_date)]
+            else:
+                period_data = full_data
+            
+            # Extract complaint data
+            complaint_data = period_data['Odour_Reports'].copy()
+            
+            # Handle missing data markers (-1) and convert to NaN
+            complaint_data = complaint_data.replace(-1, np.nan)
+            
+            # Aggregate daily (since complaints are daily)
+            daily_complaints = complaint_data.resample('D').first()
+            
+            # Keep timestamps at midnight for data alignment
+            # (The noon shift was causing alignment issues with concentration data)
+            # daily_complaints.index = daily_complaints.index + pd.Timedelta(hours=12)
+            
+            print(f"   [COMPLAINTS] Loaded {daily_complaints.notna().sum()} days with complaint data")
+            return daily_complaints
+            
+        except Exception as e:
+            print(f"   [WARN] Could not load complaint data: {e}")
+            return None
+    
     def _create_temporal_analysis_plots(self, dashboard_dir, plot_files, G_contributions):
-        """Create temporal pattern analysis plots."""
+        """Create temporal pattern analysis plots with optional complaint data overlay."""
         print("   [TIME] Creating temporal analysis plots...")
+        
+        # Note: Complaint data overlay moved to Factor Contributions plot
         
         # Try to get actual datetime information
         conc_file = self.output_dir / f"{self.filename_prefix}_concentrations.csv"
@@ -4595,9 +5716,10 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         fig, axes = plt.subplots(2, 2, figsize=(15, 12))
         fig.suptitle(f'{self.station} PMF Temporal Pattern Analysis', fontsize=16, fontweight='bold')
         
-        # Plot 1: Time series with trend
+        # Plot 1: Time series with trend and complaint overlay
         ax1 = axes[0, 0]
         
+        # Plot factor contributions
         for i in range(self.factors):
             factor_color = self.color_manager.get_factor_color(i)
             if has_datetime:
@@ -4607,7 +5729,9 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
                 ax1.plot(G_contributions[:, i], label=f'Factor {i+1}', 
                         color=factor_color, alpha=0.7, linewidth=1.5)
         
-        ax1.set_title('Factor Contributions Time Series')
+        # Note: Complaint overlay moved to main Factor Contributions plot
+        
+        ax1.set_title('Factor Contributions Time Series with Complaint Overlay')
         ax1.set_ylabel('Concentration Contribution')
         if has_datetime:
             ax1.set_xlabel('Date/Time')
@@ -4673,7 +5797,7 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
         ax3.set_ylabel('Contribution')
         ax3.grid(True, alpha=0.3)
         
-        # Plot 4: Cumulative contribution
+        # Plot 4: Cumulative contribution with complaint overlay
         ax4 = axes[1, 1]
         cumsum_contributions = np.cumsum(G_contributions, axis=0)
         
@@ -4686,7 +5810,9 @@ This analysis follows EPA PMF 5.0 User Guide best practices:
                 ax4.plot(cumsum_contributions[:, i], label=f'Factor {i+1}', 
                         color=factor_color, linewidth=2)
         
-        ax4.set_title('Cumulative Factor Contributions')
+        # Note: Complaint overlay moved to main Factor Contributions plot
+        
+        ax4.set_title('Cumulative Factor Contributions with Complaint Events')
         ax4.set_ylabel('Cumulative Contribution')
         if has_datetime:
             ax4.set_xlabel('Date/Time')
@@ -9540,6 +10666,40 @@ def show_detailed_help():
                         - Helps address extreme dynamic range differences
                         - Preserves PMF additive assumptions (unlike log-transform)
 
+[COMPLAINTS] COMPLAINT CORRELATION ANALYSIS:
+  --complaint-correlation-hours N  Time window in hours for complaint correlation analysis
+                        Default: 0 (uses daily aggregation - legacy behavior)
+                        
+                        Modes:
+                        --complaint-correlation-hours 0   # Daily aggregation (default)
+                        --complaint-correlation-hours 6   # ±6 hour window around noon
+                        --complaint-correlation-hours 12  # ±12 hour window around noon
+                        
+  --complaint-window METHOD     Statistical aggregation method for data within complaint time windows
+                        Default: average
+                        
+                        Methods:
+                        --complaint-window average    # Mean value (default)
+                        --complaint-window peak       # Maximum value
+                        --complaint-window median     # Median value  
+                        --complaint-window mode       # Most frequent value
+                        --complaint-window range      # Range (max - min)
+                        
+                        Note: Only used when --complaint-correlation-hours > 0
+                        
+                        Window Logic:
+                        - 0: Correlates daily averaged concentrations/factors with daily complaint counts
+                        - N>0: For each complaint day, aggregates concentrations/factors from 
+                               noon±N hours using selected method and correlates with complaint count
+                        - Complaint plotting: Shows complaints at noon (12:00) instead of midnight
+                        
+                        Use Cases:
+                        - 6-8 hours: Capture diurnal patterns around complaint times
+                        - 12+ hours: Full day correlation with centered time window
+                        - 0: Preserve legacy daily correlation behavior
+                        - peak: Focus on maximum pollutant concentrations during complaint periods
+                        - median: Robust to outliers in concentration data
+
 [HELP] HELP:
   --help-detail         Show this detailed help (you're reading it now!)
   -h, --help            Show standard help summary
@@ -9567,6 +10727,12 @@ python pmf_source_app.py MMF9 --species-weight CH4=5 --species-weight H2S=2 --un
 
 # Weight-aware initialization with species weighting (addresses factor degeneracy):
 python pmf_source_app.py MMF9 --species-weight CH4=5 --weight-aware-init --uncertainty-mode epa
+
+# Complaint correlation analysis with time windows (instead of daily aggregation):
+python pmf_source_app.py MMF9 --complaint-correlation-hours 6 --uncertainty-mode epa --snr-enable
+
+# Complaint correlation using peak concentrations within time windows:
+python pmf_source_app.py MMF9 --complaint-correlation-hours 12 --complaint-window peak --uncertainty-mode epa
 
 =============================================================================
     """
@@ -9749,6 +10915,12 @@ def main():
     parser.add_argument('--bootstrap-overlapping', action='store_true', default=False,
                        help='Allow overlapping blocks in bootstrap resampling (default: disabled)')
     
+    # Complaint correlation analysis controls
+    parser.add_argument('--complaint-correlation-hours', type=int, default=0,
+                       help='Time window in hours for complaint correlation analysis. Default 0 uses daily aggregation. Positive values (e.g., 6) correlate complaints with ±N hours of concentration data around each complaint timestamp (default: 0)')
+    parser.add_argument('--complaint-window', choices=['peak', 'average', 'median', 'mode', 'range'], default='average',
+                       help='Statistical aggregation method for data within complaint correlation time windows: peak (maximum), average (mean), median, mode (most frequent), range (max-min). Only used when --complaint-correlation-hours > 0 (default: average)')
+    
     args = parser.parse_args()
     
     # Handle detailed help request
@@ -9835,7 +11007,10 @@ def main():
             bootstrap_seed=args.bootstrap_seed,
             bootstrap_keep_h=args.bootstrap_keep_h,
             bootstrap_reuse_seed=args.bootstrap_reuse_seed,
-            bootstrap_overlapping=args.bootstrap_overlapping
+            bootstrap_overlapping=args.bootstrap_overlapping,
+            # Complaint correlation analysis parameters
+            complaint_correlation_hours=args.complaint_correlation_hours,
+            complaint_window_method=args.complaint_window
         )
         
         # Override default parameters if specified
