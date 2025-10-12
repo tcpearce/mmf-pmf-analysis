@@ -215,7 +215,7 @@ python pmf_source_app.py MMF9 --start-date 2024-06-01 --end-date 2024-06-30 --fa
 - Coverage gating policies (disabled, conservative, strict)
 - Advanced temporal analysis capabilities
 
-**Git Commit**: [Pending - Ready for commit]
+**Git Commit**: [51bf47c](https://github.com/tcpearce/mmf-pmf-analysis/commit/51bf47c)
 
 ---
 
