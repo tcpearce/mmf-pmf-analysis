@@ -168,7 +168,7 @@ python pmf_source_app.py MMF2 --start-date 2024-01-01 --end-date 2024-01-31 --co
 - Consider additional atmospheric analysis metrics
 - Expand pressure derivative analysis capabilities
 
-**Git Commit**: [To be added]
+**Git Commit**: [a93ab66](https://github.com/tcpearce/mmf-pmf-analysis/commit/a93ab66)
 
 ---
 
